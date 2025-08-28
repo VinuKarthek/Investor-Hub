@@ -352,10 +352,11 @@ def main():
         
         if len(filtered_df) > 0:
             # Create tabs
-            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
                 "📈 Price Charts", 
                 "🎯 Strategy Analyzer", 
                 "🔥 Volume Analysis", 
+                "🌊 Options Flow", 
                 "📊 Greeks", 
                 "📋 Data Table"
             ])
@@ -531,21 +532,9 @@ def main():
                 
                 # Add annotations for high volume dates
                 if not vol_by_expiry.empty:
-                    max_volume_idx = vol_by_expiry['volume'].idxmax()
-                    max_volume_date = vol_by_expiry.loc[max_volume_idx, 'contract_date']
-                    # Convert to string to avoid pandas timestamp issues with plotly
-                    max_volume_date_str = max_volume_date.strftime('%Y-%m-%d')
-                    # Add vline without annotation
-                    fig_vol_expiry.add_vline(x=max_volume_date, line_dash="dot", line_color="orange")
-                    # Manually add annotation
-                    fig_vol_expiry.add_annotation(
-                        x=max_volume_date,
-                        y=vol_by_expiry['volume'].max(),  # Or another y-value you prefer
-                        text="Highest Volume",
-                        showarrow=True,
-                        arrowhead=1,
-                        yshift=10
-                    )
+                    max_volume_date = vol_by_expiry.loc[vol_by_expiry['volume'].idxmax(), 'contract_date']
+                    fig_vol_expiry.add_vline(x=max_volume_date, line_dash="dot", line_color="orange", 
+                                           annotation_text="Highest Volume")
                 
                 fig_vol_expiry.update_xaxes(tickangle=45)
                 st.plotly_chart(fig_vol_expiry, use_container_width=True)
@@ -567,47 +556,32 @@ def main():
                 # Volume analysis insights
                 st.subheader("📈 Volume Analysis Insights")
                 
-                # Find most active expiry - fix the groupby aggregation
-                expiry_volumes = vol_by_expiry.groupby('contract_date')['volume'].sum()
-                if not expiry_volumes.empty:
-                    most_active_expiry = expiry_volumes.idxmax()
-                    most_active_volume = expiry_volumes.max()
-                else:
-                    most_active_expiry = pd.Timestamp.now()
-                    most_active_volume = 0
+                # Find most active expiry
+                most_active_expiry = vol_by_expiry.groupby('contract_date')['volume'].sum().idxmax()
+                most_active_volume = vol_by_expiry.groupby('contract_date')['volume'].sum().max()
                 
                 # Find most active strike
-                strike_volumes = vol_by_strike.groupby('strike_price')['volume'].sum()
-                if not strike_volumes.empty:
-                    most_active_strike = strike_volumes.idxmax()
-                    most_active_strike_volume = strike_volumes.max()
-                else:
-                    most_active_strike = current_price
-                    most_active_strike_volume = 0
+                most_active_strike = vol_by_strike.groupby('strike_price')['volume'].sum().idxmax()
+                most_active_strike_volume = vol_by_strike.groupby('strike_price')['volume'].sum().max()
                 
                 col1, col2 = st.columns(2)
                 with col1:
-                    days_to_expiry = (most_active_expiry - pd.Timestamp.now()).days if most_active_volume > 0 else 0
                     st.info(f"""
                     **🎯 Most Active Expiry Date**  
                     **{most_active_expiry.strftime('%Y-%m-%d')}**  
                     Total Volume: {most_active_volume:,.0f}  
-                    Days to Expiry: {days_to_expiry} days
+                    Days to Expiry: {(most_active_expiry - pd.Timestamp.now()).days} days
                     """)
                 
                 with col2:
-                    if most_active_strike_volume > 0:
-                        moneyness = most_active_strike / current_price
-                        strike_type = "ITM" if moneyness < 0.98 else "ATM" if abs(moneyness - 1) < 0.02 else "OTM"
-                        distance_pct = ((most_active_strike - current_price) / current_price * 100)
-                        st.info(f"""
-                        **🎯 Most Active Strike Price**  
-                        **${most_active_strike:.2f}** ({strike_type})  
-                        Total Volume: {most_active_strike_volume:,.0f}  
-                        Distance from Current: {distance_pct:+.1f}%
-                        """)
-                    else:
-                        st.info("**🎯 Most Active Strike Price**\nNo volume data available")
+                    moneyness = most_active_strike / current_price
+                    strike_type = "ITM" if moneyness < 1 else "ATM" if abs(moneyness - 1) < 0.02 else "OTM"
+                    st.info(f"""
+                    **🎯 Most Active Strike Price**  
+                    **${most_active_strike:.2f}** ({strike_type})  
+                    Total Volume: {most_active_strike_volume:,.0f}  
+                    Distance from Current: {((most_active_strike - current_price) / current_price * 100):+.1f}%
+                    """)
                 
                 # Weekly vs Monthly expiry analysis
                 weekly_monthly_analysis = filtered_df.copy()
@@ -638,8 +612,243 @@ def main():
                 top_volume['contract_date'] = top_volume['contract_date'].dt.strftime('%Y-%m-%d')
                 st.dataframe(top_volume, hide_index=True)
             
-            # Tab 4: Greeks
+            # Tab 4: Options Flow Analysis (NEW)
             with tab4:
+                st.subheader("🌊 Options Flow Analysis")
+                st.info("📊 **Options Flow Analysis** helps identify unusual activity, sentiment shifts, and institutional money movement")
+                
+                # Calculate flow metrics
+                flow_df = filtered_df.copy()
+                flow_df['days_to_expiry'] = (flow_df['contract_date'] - pd.Timestamp.now()).dt.days
+                flow_df['moneyness'] = flow_df['strike_price'] / current_price
+                flow_df['dollar_volume'] = flow_df['volume'] * flow_df['option_cost'] * 100  # *100 for contract multiplier
+                
+                # Classify moneyness
+                def classify_moneyness(moneyness, option_type):
+                    if option_type == 'call':
+                        if moneyness < 0.95:
+                            return 'Deep ITM'
+                        elif moneyness < 0.98:
+                            return 'ITM'
+                        elif moneyness <= 1.02:
+                            return 'ATM'
+                        elif moneyness <= 1.05:
+                            return 'OTM'
+                        else:
+                            return 'Deep OTM'
+                    else:  # put
+                        if moneyness > 1.05:
+                            return 'Deep ITM'
+                        elif moneyness > 1.02:
+                            return 'ITM'
+                        elif moneyness >= 0.98:
+                            return 'ATM'
+                        elif moneyness >= 0.95:
+                            return 'OTM'
+                        else:
+                            return 'Deep OTM'
+                
+                flow_df['moneyness_class'] = flow_df.apply(lambda row: classify_moneyness(row['moneyness'], row['option_type']), axis=1)
+                
+                # Flow Analysis Metrics
+                col1, col2, col3, col4 = st.columns(4)
+                
+                total_call_dollar_vol = flow_df[flow_df['option_type'] == 'call']['dollar_volume'].sum()
+                total_put_dollar_vol = flow_df[flow_df['option_type'] == 'put']['dollar_volume'].sum()
+                total_dollar_volume = total_call_dollar_vol + total_put_dollar_vol
+                
+                call_volume = flow_df[flow_df['option_type'] == 'call']['volume'].sum()
+                put_volume = flow_df[flow_df['option_type'] == 'put']['volume'].sum()
+                pc_ratio = put_volume / call_volume if call_volume > 0 else 0
+                
+                with col1:
+                    st.metric("Total $ Volume", f"${total_dollar_volume/1e6:.1f}M")
+                with col2:
+                    st.metric("Put/Call Ratio", f"{pc_ratio:.2f}", 
+                             delta="Bearish" if pc_ratio > 1 else "Bullish")
+                with col3:
+                    call_percentage = (total_call_dollar_vol / total_dollar_volume * 100) if total_dollar_volume > 0 else 0
+                    st.metric("Call $ Flow %", f"{call_percentage:.1f}%")
+                with col4:
+                    put_percentage = (total_put_dollar_vol / total_dollar_volume * 100) if total_dollar_volume > 0 else 0
+                    st.metric("Put $ Flow %", f"{put_percentage:.1f}%")
+                
+                # Flow Analysis Charts
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.write("**💰 Dollar Volume Flow by Moneyness**")
+                    
+                    # Dollar volume by moneyness
+                    dollar_vol_by_moneyness = flow_df.groupby(['moneyness_class', 'option_type'])['dollar_volume'].sum().reset_index()
+                    dollar_vol_by_moneyness['dollar_volume_millions'] = dollar_vol_by_moneyness['dollar_volume'] / 1e6
+                    
+                    # Define order for moneyness classes
+                    moneyness_order = ['Deep ITM', 'ITM', 'ATM', 'OTM', 'Deep OTM']
+                    dollar_vol_by_moneyness['moneyness_class'] = pd.Categorical(
+                        dollar_vol_by_moneyness['moneyness_class'], 
+                        categories=moneyness_order, 
+                        ordered=True
+                    )
+                    dollar_vol_by_moneyness = dollar_vol_by_moneyness.sort_values('moneyness_class')
+                    
+                    fig_dollar_flow = px.bar(
+                        dollar_vol_by_moneyness,
+                        x='moneyness_class',
+                        y='dollar_volume_millions',
+                        color='option_type',
+                        title=f"{ticker_input} Dollar Volume Flow by Moneyness",
+                        labels={'dollar_volume_millions': 'Dollar Volume ($M)', 'moneyness_class': 'Moneyness'},
+                        color_discrete_map={'call': '#2E8B57', 'put': '#DC143C'}
+                    )
+                    st.plotly_chart(fig_dollar_flow, use_container_width=True)
+                
+                with col2:
+                    st.write("**⏰ Flow by Time to Expiry**")
+                    
+                    # Classify by time to expiry
+                    def classify_dte(days):
+                        if days <= 7:
+                            return '0-7 days'
+                        elif days <= 30:
+                            return '8-30 days'
+                        elif days <= 90:
+                            return '31-90 days'
+                        else:
+                            return '90+ days'
+                    
+                    flow_df['dte_class'] = flow_df['days_to_expiry'].apply(classify_dte)
+                    
+                    dollar_vol_by_dte = flow_df.groupby(['dte_class', 'option_type'])['dollar_volume'].sum().reset_index()
+                    dollar_vol_by_dte['dollar_volume_millions'] = dollar_vol_by_dte['dollar_volume'] / 1e6
+                    
+                    # Order DTE classes
+                    dte_order = ['0-7 days', '8-30 days', '31-90 days', '90+ days']
+                    dollar_vol_by_dte['dte_class'] = pd.Categorical(
+                        dollar_vol_by_dte['dte_class'], 
+                        categories=dte_order, 
+                        ordered=True
+                    )
+                    dollar_vol_by_dte = dollar_vol_by_dte.sort_values('dte_class')
+                    
+                    fig_dte_flow = px.bar(
+                        dollar_vol_by_dte,
+                        x='dte_class',
+                        y='dollar_volume_millions',
+                        color='option_type',
+                        title=f"{ticker_input} Dollar Volume Flow by Time to Expiry",
+                        labels={'dollar_volume_millions': 'Dollar Volume ($M)', 'dte_class': 'Days to Expiry'},
+                        color_discrete_map={'call': '#2E8B57', 'put': '#DC143C'}
+                    )
+                    st.plotly_chart(fig_dte_flow, use_container_width=True)
+                
+                # Unusual Activity Detection
+                st.subheader("🚨 Unusual Activity Detection")
+                
+                # Calculate unusual activity metrics
+                flow_df['volume_rank'] = flow_df['volume'].rank(pct=True)
+                flow_df['dollar_volume_rank'] = flow_df['dollar_volume'].rank(pct=True)
+                flow_df['iv_rank'] = flow_df['impliedVolatility'].rank(pct=True) if 'impliedVolatility' in flow_df.columns else 0
+                
+                # Define unusual activity (top 10% in volume or dollar volume)
+                unusual_activity = flow_df[
+                    (flow_df['volume_rank'] >= 0.9) | 
+                    (flow_df['dollar_volume_rank'] >= 0.9)
+                ].copy()
+                
+                if not unusual_activity.empty:
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write("**🔥 High Volume Contracts**")
+                        high_volume = unusual_activity.nlargest(5, 'volume')[
+                            ['option_type', 'strike_price', 'contract_date', 'volume', 'option_cost', 'dollar_volume']
+                        ].copy()
+                        high_volume['contract_date'] = high_volume['contract_date'].dt.strftime('%Y-%m-%d')
+                        high_volume['dollar_volume'] = (high_volume['dollar_volume'] / 1000).round(0).astype(int)
+                        high_volume.columns = ['Type', 'Strike', 'Expiry', 'Volume', 'Cost', 'Dollar Vol (K)']
+                        st.dataframe(high_volume, hide_index=True)
+                    
+                    with col2:
+                        st.write("**💰 High Dollar Volume Contracts**")
+                        high_dollar = unusual_activity.nlargest(5, 'dollar_volume')[
+                            ['option_type', 'strike_price', 'contract_date', 'volume', 'option_cost', 'dollar_volume']
+                        ].copy()
+                        high_dollar['contract_date'] = high_dollar['contract_date'].dt.strftime('%Y-%m-%d')
+                        high_dollar['dollar_volume'] = (high_dollar['dollar_volume'] / 1000).round(0).astype(int)
+                        high_dollar.columns = ['Type', 'Strike', 'Expiry', 'Volume', 'Cost', 'Dollar Vol (K)']
+                        st.dataframe(high_dollar, hide_index=True)
+                else:
+                    st.info("No unusual activity detected in current filtered data")
+                
+                # Flow Sentiment Analysis
+                st.subheader("📈 Flow Sentiment Analysis")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                # ATM flow analysis
+                atm_flow = flow_df[flow_df['moneyness_class'] == 'ATM']
+                atm_call_vol = atm_flow[atm_flow['option_type'] == 'call']['dollar_volume'].sum()
+                atm_put_vol = atm_flow[atm_flow['option_type'] == 'put']['dollar_volume'].sum()
+                atm_ratio = atm_put_vol / atm_call_vol if atm_call_vol > 0 else 0
+                
+                with col1:
+                    sentiment = "🐻 Bearish" if atm_ratio > 1.2 else "🐂 Bullish" if atm_ratio < 0.8 else "⚖️ Neutral"
+                    st.metric("ATM Flow Sentiment", sentiment, f"P/C: {atm_ratio:.2f}")
+                
+                # Short-term flow (0-30 days)
+                short_term_flow = flow_df[flow_df['days_to_expiry'] <= 30]
+                st_call_vol = short_term_flow[short_term_flow['option_type'] == 'call']['dollar_volume'].sum()
+                st_put_vol = short_term_flow[short_term_flow['option_type'] == 'put']['dollar_volume'].sum()
+                st_ratio = st_put_vol / st_call_vol if st_call_vol > 0 else 0
+                
+                with col2:
+                    st_sentiment = "🐻 Bearish" if st_ratio > 1.2 else "🐂 Bullish" if st_ratio < 0.8 else "⚖️ Neutral"
+                    st.metric("Short-term Sentiment", st_sentiment, f"P/C: {st_ratio:.2f}")
+                
+                # Large trades (top 25% by dollar volume)
+                large_trades = flow_df[flow_df['dollar_volume_rank'] >= 0.75]
+                lt_call_vol = large_trades[large_trades['option_type'] == 'call']['dollar_volume'].sum()
+                lt_put_vol = large_trades[large_trades['option_type'] == 'put']['dollar_volume'].sum()
+                lt_ratio = lt_put_vol / lt_call_vol if lt_call_vol > 0 else 0
+                
+                with col3:
+                    lt_sentiment = "🐻 Bearish" if lt_ratio > 1.2 else "🐂 Bullish" if lt_ratio < 0.8 else "⚖️ Neutral"
+                    st.metric("Large Trade Sentiment", lt_sentiment, f"P/C: {lt_ratio:.2f}")
+                
+                # Flow Summary Insights
+                st.subheader("💡 Flow Analysis Insights")
+                
+                # Find dominant flows
+                dominant_moneyness = dollar_vol_by_moneyness.loc[dollar_vol_by_moneyness['dollar_volume_millions'].idxmax(), 'moneyness_class']
+                dominant_dte = dollar_vol_by_dte.loc[dollar_vol_by_dte['dollar_volume_millions'].idxmax(), 'dte_class']
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.success(f"""
+                    **🎯 Dominant Flow Patterns**
+                    - **Moneyness**: {dominant_moneyness} options seeing most $ flow
+                    - **Time Frame**: {dominant_dte} options most active
+                    - **Overall Bias**: {'Bullish' if pc_ratio < 1 else 'Bearish'} (P/C: {pc_ratio:.2f})
+                    """)
+                
+                with col2:
+                    # Calculate some interesting metrics
+                    otm_call_flow = flow_df[(flow_df['option_type'] == 'call') & (flow_df['moneyness_class'].isin(['OTM', 'Deep OTM']))]['dollar_volume'].sum()
+                    otm_put_flow = flow_df[(flow_df['option_type'] == 'put') & (flow_df['moneyness_class'].isin(['OTM', 'Deep OTM']))]['dollar_volume'].sum()
+                    
+                    weekly_flow = flow_df[flow_df['days_to_expiry'] <= 7]['dollar_volume'].sum()
+                    monthly_flow = flow_df[(flow_df['days_to_expiry'] > 7) & (flow_df['days_to_expiry'] <= 30)]['dollar_volume'].sum()
+                    
+                    st.info(f"""
+                    **📊 Key Flow Metrics**
+                    - **OTM Calls**: ${otm_call_flow/1e6:.1f}M (speculation/hedging)
+                    - **OTM Puts**: ${otm_put_flow/1e6:.1f}M (protection/bearish)
+                    - **Weekly Flow**: ${weekly_flow/1e6:.1f}M vs Monthly: ${monthly_flow/1e6:.1f}M
+                    """)
+            
+            # Tab 5: Greeks (renumbered)
+            with tab5:
                 st.subheader("Options Greeks & Metrics")
                 
                 if 'impliedVolatility' in filtered_df.columns:
@@ -674,8 +883,8 @@ def main():
                         else:
                             st.info("No put options in filtered data")
             
-            # Tab 5: Data Table
-            with tab5:
+            # Tab 6: Data Table (renumbered)
+            with tab6:
                 st.subheader("Complete Options Data")
                 
                 display_df = filtered_df.copy()
