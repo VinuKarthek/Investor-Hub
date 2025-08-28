@@ -49,7 +49,7 @@ class OptionsDataFetcher:
             progress_bar = st.progress(0)
             status_text = st.empty()
             
-            max_expirations = len(expirations)
+            max_expirations = min(len(expirations), 15)
             
             for i, exp_date in enumerate(expirations[:max_expirations]):
                 try:
@@ -497,18 +497,139 @@ def main():
             with tab3:
                 st.subheader("Volume Analysis")
                 
+                # Chart 1: Volume by Strike Price (existing)
+                st.write("**📊 Trading Volume by Strike Price**")
                 vol_by_strike = filtered_df.groupby(['strike_price', 'option_type'])['volume'].sum().reset_index()
                 
-                fig_vol = px.bar(
+                fig_vol_strike = px.bar(
                     vol_by_strike, 
                     x='strike_price', 
                     y='volume', 
                     color='option_type',
                     title=f"{ticker_input} Trading Volume by Strike Price",
-                    labels={'volume': 'Total Volume', 'strike_price': 'Strike Price ($)'}
+                    labels={'volume': 'Total Volume', 'strike_price': 'Strike Price ($)'},
+                    color_discrete_map={'call': '#2E8B57', 'put': '#DC143C'}
                 )
-                fig_vol.add_vline(x=current_price, line_dash="dash", line_color="red")
-                st.plotly_chart(fig_vol, use_container_width=True)
+                fig_vol_strike.add_vline(x=current_price, line_dash="dash", line_color="red", 
+                                       annotation_text=f"Current: ${current_price:.2f}")
+                st.plotly_chart(fig_vol_strike, use_container_width=True)
+                
+                # Chart 2: Volume by Expiry Date (NEW)
+                st.write("**📅 Trading Volume by Expiry Date**")
+                vol_by_expiry = filtered_df.groupby([filtered_df['contract_date'].dt.date, 'option_type'])['volume'].sum().reset_index()
+                vol_by_expiry['contract_date'] = pd.to_datetime(vol_by_expiry['contract_date'])
+                
+                fig_vol_expiry = px.bar(
+                    vol_by_expiry, 
+                    x='contract_date', 
+                    y='volume', 
+                    color='option_type',
+                    title=f"{ticker_input} Trading Volume by Expiry Date",
+                    labels={'volume': 'Total Volume', 'contract_date': 'Expiry Date'},
+                    color_discrete_map={'call': '#2E8B57', 'put': '#DC143C'}
+                )
+                
+                # Add annotations for high volume dates
+                if not vol_by_expiry.empty:
+                    max_volume_idx = vol_by_expiry['volume'].idxmax()
+                    max_volume_date = vol_by_expiry.loc[max_volume_idx, 'contract_date']
+                    # Convert to string to avoid pandas timestamp issues with plotly
+                    max_volume_date_str = max_volume_date.strftime('%Y-%m-%d')
+                    # Add vline without annotation
+                    fig_vol_expiry.add_vline(x=max_volume_date, line_dash="dot", line_color="orange")
+                    # Manually add annotation
+                    fig_vol_expiry.add_annotation(
+                        x=max_volume_date,
+                        y=vol_by_expiry['volume'].max(),  # Or another y-value you prefer
+                        text="Highest Volume",
+                        showarrow=True,
+                        arrowhead=1,
+                        yshift=10
+                    )
+                
+                fig_vol_expiry.update_xaxes(tickangle=45)
+                st.plotly_chart(fig_vol_expiry, use_container_width=True)
+                
+                # Volume insights
+                col1, col2, col3 = st.columns(3)
+                
+                total_call_volume = filtered_df[filtered_df['option_type'] == 'call']['volume'].sum()
+                total_put_volume = filtered_df[filtered_df['option_type'] == 'put']['volume'].sum()
+                put_call_ratio = total_put_volume / total_call_volume if total_call_volume > 0 else 0
+                
+                with col1:
+                    st.metric("Total Call Volume", f"{total_call_volume:,.0f}")
+                with col2:
+                    st.metric("Total Put Volume", f"{total_put_volume:,.0f}")
+                with col3:
+                    st.metric("Put/Call Ratio", f"{put_call_ratio:.2f}")
+                
+                # Volume analysis insights
+                st.subheader("📈 Volume Analysis Insights")
+                
+                # Find most active expiry - fix the groupby aggregation
+                expiry_volumes = vol_by_expiry.groupby('contract_date')['volume'].sum()
+                if not expiry_volumes.empty:
+                    most_active_expiry = expiry_volumes.idxmax()
+                    most_active_volume = expiry_volumes.max()
+                else:
+                    most_active_expiry = pd.Timestamp.now()
+                    most_active_volume = 0
+                
+                # Find most active strike
+                strike_volumes = vol_by_strike.groupby('strike_price')['volume'].sum()
+                if not strike_volumes.empty:
+                    most_active_strike = strike_volumes.idxmax()
+                    most_active_strike_volume = strike_volumes.max()
+                else:
+                    most_active_strike = current_price
+                    most_active_strike_volume = 0
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    days_to_expiry = (most_active_expiry - pd.Timestamp.now()).days if most_active_volume > 0 else 0
+                    st.info(f"""
+                    **🎯 Most Active Expiry Date**  
+                    **{most_active_expiry.strftime('%Y-%m-%d')}**  
+                    Total Volume: {most_active_volume:,.0f}  
+                    Days to Expiry: {days_to_expiry} days
+                    """)
+                
+                with col2:
+                    if most_active_strike_volume > 0:
+                        moneyness = most_active_strike / current_price
+                        strike_type = "ITM" if moneyness < 0.98 else "ATM" if abs(moneyness - 1) < 0.02 else "OTM"
+                        distance_pct = ((most_active_strike - current_price) / current_price * 100)
+                        st.info(f"""
+                        **🎯 Most Active Strike Price**  
+                        **${most_active_strike:.2f}** ({strike_type})  
+                        Total Volume: {most_active_strike_volume:,.0f}  
+                        Distance from Current: {distance_pct:+.1f}%
+                        """)
+                    else:
+                        st.info("**🎯 Most Active Strike Price**\nNo volume data available")
+                
+                # Weekly vs Monthly expiry analysis
+                weekly_monthly_analysis = filtered_df.copy()
+                weekly_monthly_analysis['days_to_expiry'] = (weekly_monthly_analysis['contract_date'] - pd.Timestamp.now()).dt.days
+                weekly_monthly_analysis['expiry_type'] = weekly_monthly_analysis['days_to_expiry'].apply(
+                    lambda x: 'Weekly (0-14 days)' if x <= 14 else 'Monthly (15-45 days)' if x <= 45 else 'Quarterly (45+ days)'
+                )
+                
+                expiry_type_volume = weekly_monthly_analysis.groupby(['expiry_type', 'option_type'])['volume'].sum().reset_index()
+                
+                if not expiry_type_volume.empty:
+                    st.write("**⏰ Volume Distribution by Expiry Type**")
+                    fig_expiry_type = px.bar(
+                        expiry_type_volume,
+                        x='expiry_type',
+                        y='volume',
+                        color='option_type',
+                        title="Volume Distribution: Weekly vs Monthly vs Quarterly Options",
+                        labels={'volume': 'Total Volume', 'expiry_type': 'Expiry Type'},
+                        color_discrete_map={'call': '#2E8B57', 'put': '#DC143C'}
+                    )
+                    st.plotly_chart(fig_expiry_type, use_container_width=True)
                 
                 st.subheader("Most Active Contracts")
                 top_volume = filtered_df.nlargest(10, 'volume')[
