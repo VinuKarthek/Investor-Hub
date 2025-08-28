@@ -185,7 +185,7 @@ class OptionsVisualizer:
                     customdata=exp_data['volume']
                 ))
         
-        fig.add_vline(x=current_price, line_dash="dash", line_color="red") #annotation_text=f"Current: ${current_price:.2f}")
+        fig.add_vline(x=current_price, line_dash="dash", line_color="red") #   annotation_text=f"Current: ${current_price:.2f}")
         
         fig.update_layout(
             title=f"{ticker} {option_type.upper()} Options - Strike Price vs Premium",
@@ -251,7 +251,7 @@ class OptionsVisualizer:
         )
         
         fig.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Break Even")
-        fig.add_vline(x=max_budget, line_dash="dash", line_color="orange", annotation_text="Budget Limit")
+        fig.add_vline(x=max_budget, line_dash="dash", line_color="orange") # annotation_text="Budget Limit")
         
         return fig
 
@@ -351,11 +351,12 @@ def main():
         
         if len(filtered_df) > 0:
             # Create tabs
-            tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+            tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
                 "📈 Price Charts", 
                 "🎯 Strategy Analyzer", 
                 "🔥 Volume Analysis", 
                 "🌊 Options Flow", 
+                "🌀 Volatility Surface",
                 "📊 Greeks", 
                 "📋 Data Table"
             ])
@@ -510,7 +511,7 @@ def main():
                     labels={'volume': 'Total Volume', 'strike_price': 'Strike Price ($)'},
                     color_discrete_map={'call': '#2E8B57', 'put': '#DC143C'}
                 )
-                fig_vol_strike.add_vline(x=current_price, line_dash="dash", line_color="red") #annotation_text=f"Current: ${current_price:.2f}")
+                fig_vol_strike.add_vline(x=current_price, line_dash="dash", line_color="red")  #                                       annotation_text=f"Current: ${current_price:.2f}")
                 st.plotly_chart(fig_vol_strike, use_container_width=True)
                 
                 # Chart 2: Volume by Expiry Date (NEW)
@@ -531,7 +532,7 @@ def main():
                 # Add annotations for high volume dates
                 if not vol_by_expiry.empty:
                     max_volume_date = vol_by_expiry.loc[vol_by_expiry['volume'].idxmax(), 'contract_date']
-                    fig_vol_expiry.add_vline(x=max_volume_date, line_dash="dot", line_color="orange") #annotation_text="Highest Volume")
+                    fig_vol_expiry.add_vline(x=max_volume_date, line_dash="dot", line_color="orange") #                                           annotation_text="Highest Volume")
                 
                 fig_vol_expiry.update_xaxes(tickangle=45)
                 st.plotly_chart(fig_vol_expiry, use_container_width=True)
@@ -844,8 +845,295 @@ def main():
                     - **Weekly Flow**: ${weekly_flow/1e6:.1f}M vs Monthly: ${monthly_flow/1e6:.1f}M
                     """)
             
-            # Tab 5: Greeks (renumbered)
+            # Tab 5: Volatility Surface (NEW)
             with tab5:
+                st.subheader("🌀 Volatility Surface Analysis")
+                st.info("📊 **Volatility Surface** shows implied volatility patterns across strikes and expirations - key for identifying mispriced options")
+                
+                if 'impliedVolatility' not in filtered_df.columns or filtered_df['impliedVolatility'].isna().all():
+                    st.warning("⚠️ Implied Volatility data not available for current selection")
+                else:
+                    # Prepare volatility data
+                    vol_df = filtered_df.dropna(subset=['impliedVolatility']).copy()
+                    vol_df['days_to_expiry'] = (vol_df['contract_date'] - pd.Timestamp.now()).dt.days
+                    vol_df['moneyness'] = vol_df['strike_price'] / current_price
+                    vol_df['iv_percent'] = vol_df['impliedVolatility'] * 100
+                    
+                    # Filter for reasonable data
+                    vol_df = vol_df[
+                        (vol_df['days_to_expiry'] > 0) & 
+                        (vol_df['days_to_expiry'] <= 365) &
+                        (vol_df['iv_percent'] > 5) & 
+                        (vol_df['iv_percent'] < 200)
+                    ]
+                    
+                    if not vol_df.empty:
+                        # Volatility Surface Metrics
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        avg_iv = vol_df['iv_percent'].mean()
+                        atm_iv = vol_df[abs(vol_df['moneyness'] - 1) <= 0.02]['iv_percent'].mean()
+                        iv_range = vol_df['iv_percent'].max() - vol_df['iv_percent'].min()
+                        
+                        # Calculate IV rank (simplified)
+                        iv_percentile = vol_df['iv_percent'].quantile(0.5)
+                        
+                        with col1:
+                            st.metric("Average IV", f"{avg_iv:.1f}%")
+                        with col2:
+                            st.metric("ATM IV", f"{atm_iv:.1f}%" if not np.isnan(atm_iv) else "N/A")
+                        with col3:
+                            st.metric("IV Range", f"{iv_range:.1f}%")
+                        with col4:
+                            iv_level = "High" if iv_percentile > 30 else "Low" if iv_percentile < 20 else "Medium"
+                            st.metric("IV Level", iv_level, f"{iv_percentile:.1f}%")
+                        
+                        # Create tabs for different volatility analyses
+                        vol_tab1, vol_tab2, vol_tab3, vol_tab4 = st.tabs([
+                            "🏔️ 3D Surface", "😊 Volatility Smile", "📈 Term Structure", "🎯 IV Analysis"
+                        ])
+                        
+                        with vol_tab1:
+                            st.write("**🏔️ 3D Implied Volatility Surface**")
+                            
+                            # Create 3D surface plot
+                            if len(vol_df) >= 10:  # Need sufficient data points
+                                # Pivot data for surface plot
+                                try:
+                                    # Group data to avoid overlapping points
+                                    surface_data = vol_df.groupby(['days_to_expiry', 'moneyness', 'option_type'])['iv_percent'].mean().reset_index()
+                                    
+                                    for option_type in surface_data['option_type'].unique():
+                                        type_data = surface_data[surface_data['option_type'] == option_type]
+                                        
+                                        if len(type_data) >= 5:
+                                            fig_3d = go.Figure()
+                                            
+                                            # Create scatter3d plot (easier than surface for irregular data)
+                                            fig_3d.add_trace(go.Scatter3d(
+                                                x=type_data['days_to_expiry'],
+                                                y=type_data['moneyness'],
+                                                z=type_data['iv_percent'],
+                                                mode='markers',
+                                                marker=dict(
+                                                    size=5,
+                                                    color=type_data['iv_percent'],
+                                                    colorscale='Viridis',
+                                                    colorbar=dict(title="IV %"),
+                                                    showscale=True
+                                                ),
+                                                name=f"{option_type.upper()}S",
+                                                hovertemplate='<b>%{fullData.name}</b><br>' +
+                                                            'DTE: %{x}<br>' +
+                                                            'Moneyness: %{y:.3f}<br>' +
+                                                            'IV: %{z:.1f}%<extra></extra>'
+                                            ))
+                                            
+                                            fig_3d.update_layout(
+                                                title=f"{ticker_input} {option_type.upper()} Implied Volatility Surface",
+                                                scene=dict(
+                                                    xaxis_title='Days to Expiry',
+                                                    yaxis_title='Moneyness (Strike/Spot)',
+                                                    zaxis_title='Implied Volatility (%)',
+                                                    camera=dict(eye=dict(x=1.5, y=1.5, z=1.5))
+                                                ),
+                                                height=500
+                                            )
+                                            
+                                            st.plotly_chart(fig_3d, use_container_width=True)
+                                except Exception as e:
+                                    st.warning(f"Could not create 3D surface: {str(e)}")
+                            else:
+                                st.warning("Insufficient data points for 3D surface. Need at least 10 data points.")
+                        
+                        with vol_tab2:
+                            st.write("**😊 Volatility Smile/Skew Analysis**")
+                            
+                            # Select expiration for smile analysis
+                            available_expiries = sorted(vol_df['days_to_expiry'].unique())[:5]  # First 5 expiries
+                            
+                            for dte in available_expiries:
+                                expiry_data = vol_df[vol_df['days_to_expiry'] == dte]
+                                
+                                if len(expiry_data) >= 3:
+                                    fig_smile = go.Figure()
+                                    
+                                    for option_type in ['call', 'put']:
+                                        type_data = expiry_data[expiry_data['option_type'] == option_type].sort_values('moneyness')
+                                        
+                                        if len(type_data) >= 2:
+                                            fig_smile.add_trace(go.Scatter(
+                                                x=type_data['moneyness'],
+                                                y=type_data['iv_percent'],
+                                                mode='lines+markers',
+                                                name=f"{option_type.upper()}S",
+                                                line=dict(color='green' if option_type == 'call' else 'red'),
+                                                hovertemplate='<b>%{fullData.name}</b><br>' +
+                                                            'Moneyness: %{x:.3f}<br>' +
+                                                            'IV: %{y:.1f}%<extra></extra>'
+                                            ))
+                                    
+                                    # Add ATM line
+                                    fig_smile.add_vline(x=1.0, line_dash="dash", line_color="gray")#                                                      annotation_text="ATM")
+                                    
+                                    fig_smile.update_layout(
+                                        title=f"Volatility Smile - {dte} Days to Expiry",
+                                        xaxis_title="Moneyness (Strike/Spot)",
+                                        yaxis_title="Implied Volatility (%)",
+                                        height=400
+                                    )
+                                    
+                                    st.plotly_chart(fig_smile, use_container_width=True)
+                        
+                        with vol_tab3:
+                            st.write("**📈 Volatility Term Structure**")
+                            
+                            # ATM volatility term structure
+                            atm_vol_df = vol_df[abs(vol_df['moneyness'] - 1) <= 0.05]  # Within 5% of ATM
+                            
+                            if not atm_vol_df.empty:
+                                term_structure = atm_vol_df.groupby(['days_to_expiry', 'option_type'])['iv_percent'].mean().reset_index()
+                                
+                                fig_term = go.Figure()
+                                
+                                for option_type in term_structure['option_type'].unique():
+                                    type_data = term_structure[term_structure['option_type'] == option_type].sort_values('days_to_expiry')
+                                    
+                                    fig_term.add_trace(go.Scatter(
+                                        x=type_data['days_to_expiry'],
+                                        y=type_data['iv_percent'],
+                                        mode='lines+markers',
+                                        name=f"ATM {option_type.upper()}S",
+                                        line=dict(color='green' if option_type == 'call' else 'red'),
+                                        hovertemplate='<b>%{fullData.name}</b><br>' +
+                                                    'DTE: %{x}<br>' +
+                                                    'IV: %{y:.1f}%<extra></extra>'
+                                    ))
+                                
+                                fig_term.update_layout(
+                                    title=f"{ticker_input} ATM Volatility Term Structure",
+                                    xaxis_title="Days to Expiry",
+                                    yaxis_title="Implied Volatility (%)",
+                                    height=400
+                                )
+                                
+                                st.plotly_chart(fig_term, use_container_width=True)
+                                
+                                # Term structure analysis
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    # Calculate term structure slope
+                                    short_term_iv = term_structure[term_structure['days_to_expiry'] <= 30]['iv_percent'].mean()
+                                    long_term_iv = term_structure[term_structure['days_to_expiry'] > 60]['iv_percent'].mean()
+                                    
+                                    if not (np.isnan(short_term_iv) or np.isnan(long_term_iv)):
+                                        slope = long_term_iv - short_term_iv
+                                        structure_type = "Contango" if slope > 2 else "Backwardation" if slope < -2 else "Flat"
+                                        
+                                        st.info(f"""
+                                        **📊 Term Structure Analysis**  
+                                        **Structure**: {structure_type}  
+                                        **Short-term IV**: {short_term_iv:.1f}%  
+                                        **Long-term IV**: {long_term_iv:.1f}%  
+                                        **Slope**: {slope:+.1f}%
+                                        """)
+                                
+                                with col2:
+                                    # Volatility calendar opportunities
+                                    if slope > 5:
+                                        opportunity = "📈 **Calendar Spreads** - Sell short-term, buy long-term"
+                                    elif slope < -5:
+                                        opportunity = "📉 **Reverse Calendar** - Buy short-term, sell long-term"
+                                    else:
+                                        opportunity = "⚖️ **Neutral Structure** - Limited calendar opportunities"
+                                    
+                                    st.success(f"""
+                                    **💡 Trading Opportunity**  
+                                    {opportunity}
+                                    
+                                    **Risk**: Term structure can change quickly  
+                                    **Best for**: Volatility traders
+                                    """)
+                            else:
+                                st.warning("Insufficient ATM data for term structure analysis")
+                        
+                        with vol_tab4:
+                            st.write("**🎯 Implied Volatility Analysis & Rankings**")
+                            
+                            # IV Rankings and Analysis
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.write("**📊 IV Statistics by Moneyness**")
+                                
+                                # Create moneyness bins
+                                vol_df['moneyness_bin'] = pd.cut(
+                                    vol_df['moneyness'], 
+                                    bins=[0.8, 0.95, 1.05, 1.2, 2.0], 
+                                    labels=['Deep OTM', 'OTM', 'ATM', 'ITM']
+                                )
+                                
+                                iv_by_moneyness = vol_df.groupby(['moneyness_bin', 'option_type'])['iv_percent'].agg([
+                                    'mean', 'std', 'min', 'max', 'count'
+                                ]).round(1)
+                                
+                                st.dataframe(iv_by_moneyness)
+                            
+                            with col2:
+                                st.write("**⚡ High/Low IV Opportunities**")
+                                
+                                # High IV options (potential overpriced)
+                                high_iv = vol_df.nlargest(5, 'iv_percent')[
+                                    ['option_type', 'strike_price', 'days_to_expiry', 'iv_percent', 'option_cost']
+                                ].copy()
+                                high_iv.columns = ['Type', 'Strike', 'DTE', 'IV%', 'Cost']
+                                
+                                st.write("**🔥 Highest IV (Potential Sells)**")
+                                st.dataframe(high_iv, hide_index=True)
+                                
+                                # Low IV options (potential underpriced)
+                                low_iv = vol_df.nsmallest(5, 'iv_percent')[
+                                    ['option_type', 'strike_price', 'days_to_expiry', 'iv_percent', 'option_cost']
+                                ].copy()
+                                low_iv.columns = ['Type', 'Strike', 'DTE', 'IV%', 'Cost']
+                                
+                                st.write("**❄️ Lowest IV (Potential Buys)**")
+                                st.dataframe(low_iv, hide_index=True)
+                            
+                            # IV Skew Analysis
+                            st.subheader("📐 Volatility Skew Analysis")
+                            
+                            # Calculate skew for near-term options
+                            near_term = vol_df[vol_df['days_to_expiry'] <= 45]
+                            
+                            if len(near_term) >= 5:
+                                # Put-call IV differential
+                                call_iv = near_term[near_term['option_type'] == 'call']['iv_percent'].mean()
+                                put_iv = near_term[near_term['option_type'] == 'put']['iv_percent'].mean()
+                                
+                                if not (np.isnan(call_iv) or np.isnan(put_iv)):
+                                    skew = put_iv - call_iv
+                                    skew_interpretation = (
+                                        "📈 **Positive Skew** - Puts more expensive (fear premium)" if skew > 2 else
+                                        "📉 **Negative Skew** - Calls more expensive (speculation premium)" if skew < -2 else
+                                        "⚖️ **Neutral Skew** - Calls and puts fairly valued"
+                                    )
+                                    
+                                    col1, col2, col3 = st.columns(3)
+                                    with col1:
+                                        st.metric("Average Call IV", f"{call_iv:.1f}%")
+                                    with col2:
+                                        st.metric("Average Put IV", f"{put_iv:.1f}%")
+                                    with col3:
+                                        st.metric("Put-Call Skew", f"{skew:+.1f}%")
+                                    
+                                    st.info(f"**Skew Interpretation**: {skew_interpretation}")
+                    else:
+                        st.warning("No valid volatility data found in current selection")
+            
+            # Tab 6: Greeks (renumbered)
+            with tab6:
                 st.subheader("Options Greeks & Metrics")
                 
                 if 'impliedVolatility' in filtered_df.columns:
