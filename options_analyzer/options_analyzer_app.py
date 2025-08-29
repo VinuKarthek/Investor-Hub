@@ -185,7 +185,7 @@ class OptionsVisualizer:
                     customdata=exp_data['volume']
                 ))
         
-        fig.add_vline(x=current_price, line_dash="dash", line_color="red") #   annotation_text=f"Current: ${current_price:.2f}")
+        fig.add_vline(x=current_price, line_dash="dash", line_color="red")#,annotation_text=f"Current: ${current_price:.2f}")
         
         fig.update_layout(
             title=f"{ticker} {option_type.upper()} Options - Strike Price vs Premium",
@@ -251,7 +251,7 @@ class OptionsVisualizer:
         )
         
         fig.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Break Even")
-        fig.add_vline(x=max_budget, line_dash="dash", line_color="orange") # annotation_text="Budget Limit")
+        fig.add_vline(x=max_budget, line_dash="dash", line_color="orange")#, annotation_text="Budget Limit")
         
         return fig
 
@@ -351,12 +351,13 @@ def main():
         
         if len(filtered_df) > 0:
             # Create tabs
-            tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
                 "📈 Price Charts", 
                 "🎯 Strategy Analyzer", 
                 "🔥 Volume Analysis", 
                 "🌊 Options Flow", 
                 "🌀 Volatility Surface",
+                "⏰ Time Decay",
                 "📊 Greeks", 
                 "📋 Data Table"
             ])
@@ -511,7 +512,7 @@ def main():
                     labels={'volume': 'Total Volume', 'strike_price': 'Strike Price ($)'},
                     color_discrete_map={'call': '#2E8B57', 'put': '#DC143C'}
                 )
-                fig_vol_strike.add_vline(x=current_price, line_dash="dash", line_color="red")  #                                       annotation_text=f"Current: ${current_price:.2f}")
+                fig_vol_strike.add_vline(x=current_price, line_dash="dash", line_color="red")#,annotation_text=f"Current: ${current_price:.2f}")
                 st.plotly_chart(fig_vol_strike, use_container_width=True)
                 
                 # Chart 2: Volume by Expiry Date (NEW)
@@ -532,7 +533,7 @@ def main():
                 # Add annotations for high volume dates
                 if not vol_by_expiry.empty:
                     max_volume_date = vol_by_expiry.loc[vol_by_expiry['volume'].idxmax(), 'contract_date']
-                    fig_vol_expiry.add_vline(x=max_volume_date, line_dash="dot", line_color="orange") #                                           annotation_text="Highest Volume")
+                    fig_vol_expiry.add_vline(x=max_volume_date, line_dash="dot", line_color="orange")#,annotation_text="Highest Volume")
                 
                 fig_vol_expiry.update_xaxes(tickangle=45)
                 st.plotly_chart(fig_vol_expiry, use_container_width=True)
@@ -974,7 +975,7 @@ def main():
                                             ))
                                     
                                     # Add ATM line
-                                    fig_smile.add_vline(x=1.0, line_dash="dash", line_color="gray")#                                                      annotation_text="ATM")
+                                    fig_smile.add_vline(x=1.0, line_dash="dash", line_color="gray")#,annotation_text="ATM")
                                     
                                     fig_smile.update_layout(
                                         title=f"Volatility Smile - {dte} Days to Expiry",
@@ -1026,6 +1027,7 @@ def main():
                                     # Calculate term structure slope
                                     short_term_iv = term_structure[term_structure['days_to_expiry'] <= 30]['iv_percent'].mean()
                                     long_term_iv = term_structure[term_structure['days_to_expiry'] > 60]['iv_percent'].mean()
+                                    slope = 0
                                     
                                     if not (np.isnan(short_term_iv) or np.isnan(long_term_iv)):
                                         slope = long_term_iv - short_term_iv
@@ -1168,8 +1170,8 @@ def main():
                         else:
                             st.info("No put options in filtered data")
             
-            # Tab 6: Data Table (renumbered)
-            with tab6:
+            # Tab 8: Data Table (renumbered)
+            with tab8:
                 st.subheader("Complete Options Data")
                 
                 display_df = filtered_df.copy()
