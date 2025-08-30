@@ -6,6 +6,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 import numpy as np
 import time
+import scipy.stats as stats
 
 # Set page config
 st.set_page_config(page_title="Options Trading Analyzer", layout="wide")
@@ -1497,34 +1498,519 @@ def main():
             
                         # Tab 6: Greeks (renumbered)
             
+            # Tab 7: Greeks Analysis
             with tab7:
-                st.subheader("Options Greeks & Metrics")
+                st.subheader("📊 Options Greeks & Risk Metrics")
+                st.info("**Greeks** measure how option prices change with market variables - essential for risk management")
                 
+                # Calculate Greeks for filtered data
+                greeks_df = filtered_df.copy()
+                greeks_df['days_to_expiry'] = (greeks_df['contract_date'] - pd.Timestamp.now()).dt.days
+                greeks_df['days_to_expiry'] = greeks_df['days_to_expiry'].clip(lower=1)  # Avoid division by zero
+                greeks_df['moneyness'] = greeks_df['strike_price'] / current_price
                 
+                # Simplified Greeks calculations (Black-Scholes approximations)
+                import scipy.stats as stats
+                
+                def calculate_greeks(row, current_price, risk_free_rate=0.05):
+                    """Calculate approximate Greeks for options"""
+                    S = current_price
+                    K = row['strike_price']
+                    T = row['days_to_expiry'] / 365
+                    sigma = row['impliedVolatility'] if 'impliedVolatility' in row and not pd.isna(row['impliedVolatility']) else 0.3
+                    r = risk_free_rate
+                    option_type = row['option_type']
+                    
+                    # Avoid calculation errors
+                    if T <= 0 or sigma <= 0:
+                        return pd.Series({'delta': 0, 'gamma': 0, 'theta': 0, 'vega': 0})
+                    
+                    # Calculate d1 and d2
+                    d1 = (np.log(S/K) + (r + 0.5*sigma**2)*T) / (sigma*np.sqrt(T))
+                    d2 = d1 - sigma*np.sqrt(T)
+                    
+                    # Delta
+                    if option_type == 'call':
+                        delta = stats.norm.cdf(d1)
+                    else:
+                        delta = -stats.norm.cdf(-d1)
+                    
+                    # Gamma (same for calls and puts)
+                    gamma = stats.norm.pdf(d1) / (S * sigma * np.sqrt(T))
+                    
+                    # Theta
+                    if option_type == 'call':
+                        theta = (-S * stats.norm.pdf(d1) * sigma / (2 * np.sqrt(T)) 
+                                - r * K * np.exp(-r*T) * stats.norm.cdf(d2)) / 365
+                    else:
+                        theta = (-S * stats.norm.pdf(d1) * sigma / (2 * np.sqrt(T)) 
+                                + r * K * np.exp(-r*T) * stats.norm.cdf(-d2)) / 365
+                    
+                    # Vega (same for calls and puts)
+                    vega = S * stats.norm.pdf(d1) * np.sqrt(T) / 100
+                    
+                    return pd.Series({'delta': delta, 'gamma': gamma, 'theta': theta, 'vega': vega})
+                
+                # Calculate Greeks for each option
+                greeks_calculated = greeks_df.apply(lambda row: calculate_greeks(row, current_price), axis=1)
+                greeks_df = pd.concat([greeks_df, greeks_calculated], axis=1)
+                
+                # Main Greeks Metrics Dashboard
+                col1, col2, col3, col4 = st.columns(4)
+                
+                total_delta = greeks_df['delta'].sum()
+                total_gamma = greeks_df['gamma'].sum()
+                total_theta = greeks_df['theta'].sum()
+                total_vega = greeks_df['vega'].sum()
+                
+                with col1:
+                    delta_color = "🟢" if abs(total_delta) < 10 else "🟡" if abs(total_delta) < 50 else "🔴"
+                    st.metric(f"{delta_color} Total Delta", f"{total_delta:.2f}",
+                             delta="Bullish" if total_delta > 0 else "Bearish")
+                
+                with col2:
+                    gamma_color = "🟢" if abs(total_gamma) < 1 else "🟡" if abs(total_gamma) < 5 else "🔴"
+                    st.metric(f"{gamma_color} Total Gamma", f"{total_gamma:.4f}",
+                             delta="High Risk" if abs(total_gamma) > 5 else "Stable")
+                
+                with col3:
+                    theta_color = "🔴" if total_theta < -10 else "🟡" if total_theta < -5 else "🟢"
+                    st.metric(f"{theta_color} Total Theta", f"${total_theta:.2f}/day",
+                             delta=f"${total_theta*7:.2f}/week")
+                
+                with col4:
+                    vega_color = "🟢" if abs(total_vega) < 10 else "🟡" if abs(total_vega) < 50 else "🔴"
+                    st.metric(f"{vega_color} Total Vega", f"{total_vega:.2f}",
+                             delta="High IV Risk" if abs(total_vega) > 50 else "Low IV Risk")
+                
+                # Greeks Sub-tabs
+                greeks_tab1, greeks_tab2, greeks_tab3, greeks_tab4 = st.tabs([
+                    "🎯 Delta Analysis", "⚡ Gamma Analysis", "⏰ Theta Analysis", "🌊 Vega Analysis"
+                ])
+                
+                with greeks_tab1:
+                    st.write("**🎯 Delta Analysis - Directional Exposure**")
+                    st.caption("Delta measures the rate of change in option price for a $1 move in the underlying")
+                    
+                    # Delta distribution chart
+                    delta_by_strike = greeks_df.groupby(['strike_price', 'option_type'])['delta'].sum().reset_index()
+                    
+                    fig_delta = px.bar(
+                        delta_by_strike,
+                        x='strike_price',
+                        y='delta',
+                        color='option_type',
+                        title=f"{ticker_input} Delta Distribution by Strike",
+                        labels={'delta': 'Delta', 'strike_price': 'Strike Price ($)'},
+                        color_discrete_map={'call': '#2E8B57', 'put': '#DC143C'}
+                    )
+                    fig_delta.add_vline(x=current_price, line_dash="dash", line_color="red",
+                                      annotation_text=f"Current: ${current_price:.2f}")
+                    fig_delta.add_hline(y=0, line_dash="solid", line_color="gray")
+                    st.plotly_chart(fig_delta, use_container_width=True)
+                    
+                    # Delta summary
+                    col1, col2, col3 = st.columns(3)
+                    
+                    call_delta = greeks_df[greeks_df['option_type'] == 'call']['delta'].sum()
+                    put_delta = greeks_df[greeks_df['option_type'] == 'put']['delta'].sum()
+                    net_delta = call_delta + put_delta
+                    
+                    with col1:
+                        st.metric("Call Delta", f"{call_delta:.2f}")
+                    with col2:
+                        st.metric("Put Delta", f"{put_delta:.2f}")
+                    with col3:
+                        stance = "🐂 Bullish" if net_delta > 10 else "🐻 Bearish" if net_delta < -10 else "⚖️ Neutral"
+                        st.metric("Portfolio Stance", stance, f"Net: {net_delta:.2f}")
+                    
+                    # High delta positions
+                    st.write("**🔥 High Delta Positions (|Delta| > 0.7)**")
+                    high_delta = greeks_df[abs(greeks_df['delta']) > 0.7].nlargest(10, 'volume')[
+                        ['option_type', 'strike_price', 'contract_date', 'delta', 'option_cost', 'volume']
+                    ].copy()
+                    
+                    if not high_delta.empty:
+                        high_delta['contract_date'] = high_delta['contract_date'].dt.strftime('%Y-%m-%d')
+                        high_delta.columns = ['Type', 'Strike', 'Expiry', 'Delta', 'Cost', 'Volume']
+                        high_delta = high_delta.round(3)
+                        st.dataframe(high_delta, hide_index=True)
+                    else:
+                        st.info("No high delta positions found")
+                
+                with greeks_tab2:
+                    st.write("**⚡ Gamma Analysis - Acceleration Risk**")
+                    st.caption("Gamma measures the rate of change in Delta - shows where risk accelerates")
+                    
+                    # Gamma concentration chart
+                    fig_gamma = px.scatter(
+                        greeks_df,
+                        x='strike_price',
+                        y='gamma',
+                        color='option_type',
+                        size='volume',
+                        title=f"{ticker_input} Gamma Concentration",
+                        labels={'gamma': 'Gamma', 'strike_price': 'Strike Price ($)'},
+                        color_discrete_map={'call': '#2E8B57', 'put': '#DC143C'}
+                    )
+                    fig_gamma.add_vline(x=current_price, line_dash="dash", line_color="red",
+                                      annotation_text=f"Current: ${current_price:.2f}")
+                    st.plotly_chart(fig_gamma, use_container_width=True)
+                    
+                    # Gamma analysis
+                    max_gamma_strike = greeks_df.loc[greeks_df['gamma'].idxmax(), 'strike_price'] if not greeks_df.empty else 0
+                    max_gamma_value = greeks_df['gamma'].max() if not greeks_df.empty else 0
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Max Gamma Strike", f"${max_gamma_strike:.2f}")
+                    with col2:
+                        st.metric("Max Gamma Value", f"{max_gamma_value:.4f}")
+                    with col3:
+                        weekly_gamma = greeks_df[greeks_df['days_to_expiry'] <= 7]['gamma'].sum()
+                        st.metric("Weekly Gamma Risk", f"{weekly_gamma:.4f}",
+                                 delta="High Risk!" if weekly_gamma > 1 else "Normal")
+                    
+                    # Gamma risk zones
+                    st.write("**⚠️ Gamma Risk Zones**")
+                    
+                    risk_zones = []
+                    for strike in greeks_df['strike_price'].unique():
+                        strike_gamma = greeks_df[greeks_df['strike_price'] == strike]['gamma'].sum()
+                        if strike_gamma > 0.01:
+                            distance = abs(strike - current_price)
+                            risk_zones.append({
+                                'Strike': strike,
+                                'Total Gamma': strike_gamma,
+                                'Distance from Current': f"${distance:.2f}",
+                                'Risk Level': '🔴 HIGH' if strike_gamma > 0.1 else '🟡 MEDIUM'
+                            })
+                    
+                    if risk_zones:
+                        risk_df = pd.DataFrame(risk_zones).sort_values('Total Gamma', ascending=False).head(5)
+                        st.dataframe(risk_df, hide_index=True)
+                    else:
+                        st.info("No significant gamma risk zones detected")
+                
+                with greeks_tab3:
+                    st.write("**⏰ Theta Analysis - Time Decay**")
+                    st.caption("Theta measures daily time decay - how much value options lose each day")
+                    
+                    # Theta by expiration
+                    theta_by_expiry = greeks_df.groupby('contract_date')['theta'].sum().reset_index()
+                    theta_by_expiry = theta_by_expiry.sort_values('contract_date')
+                    
+                    fig_theta = px.bar(
+                        theta_by_expiry,
+                        x='contract_date',
+                        y='theta',
+                        title=f"{ticker_input} Daily Theta Decay by Expiration",
+                        labels={'theta': 'Daily Theta ($)', 'contract_date': 'Expiration Date'}
+                    )
+                    fig_theta.update_traces(marker_color='red')
+                    st.plotly_chart(fig_theta, use_container_width=True)
+                    
+                    # Theta breakdown
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Theta by option type
+                        theta_breakdown = greeks_df.groupby('option_type')['theta'].sum()
+                        
+                        if not theta_breakdown.empty:
+                            fig_theta_pie = px.pie(
+                                values=abs(theta_breakdown.values),
+                                names=theta_breakdown.index,
+                                title="Theta Decay by Option Type",
+                                color_discrete_map={'call': '#2E8B57', 'put': '#DC143C'}
+                            )
+                            st.plotly_chart(fig_theta_pie, use_container_width=True)
+                    
+                    with col2:
+                        st.write("**📊 Theta Decay Summary**")
+                        
+                        weekly_theta = total_theta * 7
+                        monthly_theta = total_theta * 30
+                        
+                        st.info(f"""
+                        **Time Decay Metrics:**
+                        - **Daily**: ${total_theta:.2f}
+                        - **Weekly**: ${weekly_theta:.2f}
+                        - **Monthly**: ${monthly_theta:.2f}
+                        
+                        **Interpretation:**
+                        {"🔴 High decay - consider closing short-term positions" if total_theta < -10 else 
+                         "🟡 Moderate decay - monitor positions" if total_theta < -5 else
+                         "🟢 Low decay - favorable for holding"}
+                        """)
+                    
+                    # Highest theta positions
+                    st.write("**🔥 Highest Theta Decay Positions**")
+                    high_theta = greeks_df.nsmallest(10, 'theta')[
+                        ['option_type', 'strike_price', 'contract_date', 'theta', 'days_to_expiry', 'option_cost']
+                    ].copy()
+                    
+                    if not high_theta.empty:
+                        high_theta['contract_date'] = high_theta['contract_date'].dt.strftime('%Y-%m-%d')
+                        high_theta['theta'] = high_theta['theta'].round(3)
+                        high_theta.columns = ['Type', 'Strike', 'Expiry', 'Daily Theta ($)', 'DTE', 'Cost']
+                        st.dataframe(high_theta, hide_index=True)
+                
+                with greeks_tab4:
+                    st.write("**🌊 Vega Analysis - Volatility Sensitivity**")
+                    st.caption("Vega measures sensitivity to changes in implied volatility")
+                    
+                    # Vega distribution
+                    vega_by_strike = greeks_df.groupby(['strike_price', 'option_type'])['vega'].sum().reset_index()
+                    
+                    fig_vega = px.bar(
+                        vega_by_strike,
+                        x='strike_price',
+                        y='vega',
+                        color='option_type',
+                        title=f"{ticker_input} Vega Distribution by Strike",
+                        labels={'vega': 'Vega', 'strike_price': 'Strike Price ($)'},
+                        color_discrete_map={'call': '#2E8B57', 'put': '#DC143C'}
+                    )
+                    fig_vega.add_vline(x=current_price, line_dash="dash", line_color="red",
+                                     annotation_text=f"Current: ${current_price:.2f}")
+                    st.plotly_chart(fig_vega, use_container_width=True)
+                    
+                    # Vega analysis
+                    max_vega_strike = greeks_df.loc[greeks_df['vega'].idxmax(), 'strike_price'] if not greeks_df.empty else 0
+                    max_vega_value = greeks_df['vega'].max() if not greeks_df.empty else 0
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Max Vega Strike", f"${max_vega_strike:.2f}")
+                    with col2:
+                        st.metric("Max Vega Value", f"{max_vega_value:.2f}")
+                    with col3:
+                        vega_risk = "High" if abs(total_vega) > 50 else "Medium" if abs(total_vega) > 20 else "Low"
+                        st.metric("Volatility Risk", vega_risk, f"Total: {total_vega:.2f}")
+                    
+                    # Volatility scenario analysis
+                    st.write("**📈 Volatility Scenario Analysis**")
+                    
+                    scenarios = []
+                    for iv_change in [-10, -5, 0, 5, 10]:
+                        pnl = total_vega * iv_change
+                        scenarios.append({
+                            'IV Change (%)': f"{iv_change:+d}%",
+                            'Portfolio P&L': f"${pnl:+.2f}",
+                            'Impact': '🟢 Positive' if pnl > 0 else '🔴 Negative' if pnl < 0 else '⚪ Neutral'
+                        })
+                    
+                    scenario_df = pd.DataFrame(scenarios)
+                    st.dataframe(scenario_df, hide_index=True)
+                    
+                    # Vega concentration warning
+                    if abs(total_vega) > 50:
+                        st.warning(f"""
+                        ⚠️ **High Vega Exposure Detected**
+                        
+                        Your portfolio has significant volatility risk:
+                        - Total Vega: {total_vega:.2f}
+                        - A 10% IV change would result in ${abs(total_vega * 10):.2f} P&L
+                        
+                        Consider hedging with opposite vega positions or reducing exposure.
+                        """)
+                
+                # Portfolio Greeks Summary
+                st.subheader("📊 Portfolio Greeks Summary")
+                
+                greeks_summary = pd.DataFrame({
+                    'Greek': ['Delta', 'Gamma', 'Theta', 'Vega'],
+                    'Value': [total_delta, total_gamma, total_theta, total_vega],
+                    'Interpretation': [
+                        f"{'Bullish bias' if total_delta > 0 else 'Bearish bias'} - ${abs(total_delta):.2f} per $1 move",
+                        f"{'High' if abs(total_gamma) > 1 else 'Low'} acceleration risk",
+                        f"Losing ${abs(total_theta):.2f} per day to time decay",
+                        f"${abs(total_vega):.2f} P&L per 1% IV change"
+                    ],
+                    'Risk Level': [
+                        '🟢 Low' if abs(total_delta) < 10 else '🟡 Medium' if abs(total_delta) < 50 else '🔴 High',
+                        '🟢 Low' if abs(total_gamma) < 0.5 else '🟡 Medium' if abs(total_gamma) < 2 else '🔴 High',
+                        '🟢 Low' if abs(total_theta) < 5 else '🟡 Medium' if abs(total_theta) < 20 else '🔴 High',
+                        '🟢 Low' if abs(total_vega) < 20 else '🟡 Medium' if abs(total_vega) < 50 else '🔴 High'
+                    ]
+                })
+                
+                st.dataframe(greeks_summary, hide_index=True, use_container_width=True)
 
-            # Tab 8: Data Table (renumbered)
+            # Tab 8: Enhanced Data Table
             with tab8:
-                st.subheader("Complete Options Data")
+                st.subheader("📋 Complete Options Data with Advanced Features")
                 
+                # Prepare enhanced display dataframe
                 display_df = filtered_df.copy()
-                display_df['contract_date'] = display_df['contract_date'].dt.strftime('%Y-%m-%d')
-                display_df = display_df.round(4)
                 
-                search_term = st.text_input("Search in data:", placeholder="Enter strike price, date, etc.")
+                # Add calculated fields
+                display_df['days_to_expiry'] = (display_df['contract_date'] - pd.Timestamp.now()).dt.days
+                display_df['moneyness'] = (display_df['strike_price'] / current_price).round(3)
+                display_df['bid_ask_spread'] = (display_df['ask'] - display_df['bid']).round(4) if 'bid' in display_df.columns and 'ask' in display_df.columns else 0
+                
+                # Calculate intrinsic and time value
+                display_df['intrinsic_value'] = display_df.apply(
+                    lambda x: max(0, current_price - x['strike_price']) if x['option_type'] == 'call' 
+                    else max(0, x['strike_price'] - current_price), axis=1
+                ).round(2)
+                display_df['time_value'] = (display_df['option_cost'] - display_df['intrinsic_value']).round(2)
+                
+                # Column selection
+                st.write("**🎛️ Display Settings**")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    available_columns = display_df.columns.tolist()
+                    default_columns = ['option_type', 'strike_price', 'contract_date', 'option_cost', 
+                                     'volume', 'bid', 'ask', 'impliedVolatility', 'days_to_expiry', 
+                                     'moneyness', 'intrinsic_value', 'time_value']
+                    selected_columns = st.multiselect(
+                        "Select columns to display:",
+                        options=available_columns,
+                        default=[col for col in default_columns if col in available_columns]
+                    )
+                
+                with col2:
+                    sort_column = st.selectbox(
+                        "Sort by:",
+                        options=selected_columns if selected_columns else ['strike_price'],
+                        index=0
+                    )
+                    sort_order = st.radio("Sort order:", ["Ascending", "Descending"], horizontal=True)
+                
+                with col3:
+                    # Quick filters
+                    st.write("**Quick Filters:**")
+                    filter_itm = st.checkbox("ITM only")
+                    filter_atm = st.checkbox("ATM only (±2%)")
+                    filter_otm = st.checkbox("OTM only")
+                    filter_high_volume = st.checkbox("High volume (>100)")
+                    filter_weekly = st.checkbox("Weekly (<7 days)")
+                    filter_monthly = st.checkbox("Monthly (7-30 days)")
+                
+                # Apply quick filters
+                if filter_itm:
+                    display_df = display_df[
+                        ((display_df['option_type'] == 'call') & (display_df['strike_price'] < current_price)) |
+                        ((display_df['option_type'] == 'put') & (display_df['strike_price'] > current_price))
+                    ]
+                
+                if filter_atm:
+                    display_df = display_df[abs(display_df['moneyness'] - 1) <= 0.02]
+                
+                if filter_otm:
+                    display_df = display_df[
+                        ((display_df['option_type'] == 'call') & (display_df['strike_price'] > current_price)) |
+                        ((display_df['option_type'] == 'put') & (display_df['strike_price'] < current_price))
+                    ]
+                
+                if filter_high_volume:
+                    display_df = display_df[display_df['volume'] > 100]
+                
+                if filter_weekly:
+                    display_df = display_df[display_df['days_to_expiry'] <= 7]
+                
+                if filter_monthly:
+                    display_df = display_df[(display_df['days_to_expiry'] > 7) & (display_df['days_to_expiry'] <= 30)]
+                
+                # Search functionality with clear button
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    search_term = st.text_input("🔍 Search in data:", placeholder="Enter strike price, date, type, etc.")
+                with col2:
+                    st.write("")
+                    st.write("")
+                    if st.button("Clear Search"):
+                        search_term = ""
+                
                 if search_term:
                     display_df = display_df[
                         display_df.astype(str).apply(lambda x: x.str.contains(search_term, case=False, na=False)).any(axis=1)
                     ]
                 
-                st.dataframe(display_df, hide_index=True, use_container_width=True)
+                # Sort data
+                if selected_columns and sort_column in display_df.columns:
+                    display_df = display_df.sort_values(sort_column, ascending=(sort_order == "Ascending"))
                 
-                csv = display_df.to_csv(index=False)
-                st.download_button(
-                    label="📥 Download Data as CSV",
-                    data=csv,
-                    file_name=f"{ticker_input.lower()}_options_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
-                )
+                # Display metrics
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Rows", len(display_df))
+                with col2:
+                    st.metric("Total Volume", f"{display_df['volume'].sum():,.0f}" if 'volume' in display_df.columns else "N/A")
+                with col3:
+                    st.metric("Avg Premium", f"${display_df['option_cost'].mean():.2f}" if 'option_cost' in display_df.columns else "N/A")
+                with col4:
+                    unique_strikes = display_df['strike_price'].nunique() if 'strike_price' in display_df.columns else 0
+                    st.metric("Unique Strikes", unique_strikes)
+                
+                # Format display dataframe
+                if selected_columns:
+                    final_display_df = display_df[selected_columns].copy()
+                else:
+                    final_display_df = display_df.copy()
+                
+                # Format date columns
+                for col in final_display_df.columns:
+                    if 'date' in col.lower() and final_display_df[col].dtype == 'object':
+                        try:
+                            final_display_df[col] = pd.to_datetime(final_display_df[col]).dt.strftime('%Y-%m-%d')
+                        except:
+                            pass
+                
+                # Format IV as percentage
+                if 'impliedVolatility' in final_display_df.columns:
+                    final_display_df['impliedVolatility'] = (final_display_df['impliedVolatility'] * 100).round(2).astype(str) + '%'
+                
+                # Round numeric columns
+                numeric_columns = final_display_df.select_dtypes(include=[np.number]).columns
+                final_display_df[numeric_columns] = final_display_df[numeric_columns].round(3)
+                
+                # Display the dataframe
+                st.dataframe(final_display_df, hide_index=True, use_container_width=True)
+                
+                # Summary statistics
+                with st.expander("📊 Summary Statistics"):
+                    if len(display_df) > 0:
+                        summary_stats = display_df[numeric_columns].describe().round(3)
+                        st.dataframe(summary_stats)
+                    else:
+                        st.info("No data to summarize")
+                
+                # Export options
+                st.write("**📥 Export Options**")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    csv = final_display_df.to_csv(index=False)
+                    st.download_button(
+                        label="📄 Download as CSV",
+                        data=csv,
+                        file_name=f"{ticker_input.lower()}_options_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
+                
+                with col2:
+                    json_data = final_display_df.to_json(orient='records', date_format='iso')
+                    st.download_button(
+                        label="📋 Download as JSON",
+                        data=json_data,
+                        file_name=f"{ticker_input.lower()}_options_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                        mime="application/json"
+                    )
+                
+                with col3:
+                    tsv = final_display_df.to_csv(index=False, sep='\t')
+                    st.download_button(
+                        label="📊 Download as TSV (Excel)",
+                        data=tsv,
+                        file_name=f"{ticker_input.lower()}_options_{datetime.now().strftime('%Y%m%d_%H%M%S')}.tsv",
+                        mime="text/tab-separated-values"
+                    )
         
         else:
             st.warning("⚠️ No data matches your current filters. Please adjust the filter settings.")
