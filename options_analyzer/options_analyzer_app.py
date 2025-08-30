@@ -1133,9 +1133,340 @@ def main():
                                     st.info(f"**Skew Interpretation**: {skew_interpretation}")
                     else:
                         st.warning("No valid volatility data found in current selection")
-            
-            # Tab 6: Greeks (renumbered)
+                                      
+            # Tab 6: Time Decay Analysis 
             with tab6:
+                st.subheader("⏰ Time Decay Analysis")
+                st.info("📊 **Time Decay (Theta)** measures how much an option loses value each day as it approaches expiration")
+                
+                # Calculate time decay metrics
+                decay_df = filtered_df.copy()
+                decay_df['days_to_expiry'] = (decay_df['contract_date'] - pd.Timestamp.now()).dt.days
+                decay_df = decay_df[decay_df['days_to_expiry'] > 0]  # Only future expirations
+                
+                if not decay_df.empty:
+                    # Calculate time value and estimated theta
+                    decay_df['intrinsic_value'] = 0
+                    decay_df['time_value'] = 0
+                    
+                    for idx, row in decay_df.iterrows():
+                        if row['option_type'] == 'call':
+                            intrinsic = max(0, current_price - row['strike_price'])
+                        else:
+                            intrinsic = max(0, row['strike_price'] - current_price)
+                        
+                        decay_df.loc[idx, 'intrinsic_value'] = intrinsic
+                        decay_df.loc[idx, 'time_value'] = row['option_cost'] - intrinsic
+                    
+                    # Estimate theta (simplified calculation)
+                    decay_df['estimated_theta'] = decay_df['time_value'] / decay_df['days_to_expiry']
+                    decay_df['theta_efficiency'] = (decay_df['estimated_theta'] / decay_df['option_cost']) * 100
+                    
+                    # Classify decay zones
+                    def classify_decay_zone(dte):
+                        if dte <= 15:
+                            return '🚨 Danger Zone (0-15 DTE)'
+                        elif dte <= 30:
+                            return '🏃‍♂️ Acceleration Zone (16-30 DTE)'
+                        elif dte <= 60:
+                            return '🎯 Steady Decay Zone (31-60 DTE)'
+                        else:
+                            return '❄️ Slow Decay Zone (60+ DTE)'
+                    
+                    decay_df['decay_zone'] = decay_df['days_to_expiry'].apply(classify_decay_zone)
+                    
+                    # Main Metrics Dashboard
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    avg_time_value = decay_df['time_value'].mean()
+                    daily_theta = decay_df['estimated_theta'].sum()
+                    high_theta_count = len(decay_df[decay_df['estimated_theta'] > decay_df['estimated_theta'].quantile(0.75)])
+                    
+                    # Determine decay speed
+                    avg_dte = decay_df['days_to_expiry'].mean()
+                    if avg_dte <= 15:
+                        decay_speed = "🔥 CRITICAL"
+                    elif avg_dte <= 30:
+                        decay_speed = "⚡ FAST"
+                    elif avg_dte <= 60:
+                        decay_speed = "🏃‍♂️ MODERATE"
+                    else:
+                        decay_speed = "❄️ SLOW"
+                    
+                    with col1:
+                        st.metric("📊 Average Time Value", f"${avg_time_value:.2f}")
+                    with col2:
+                        st.metric("⚡ Daily Theta Burn", f"${daily_theta:.2f}/day", 
+                                 delta=f"{daily_theta*7:.2f}/week")
+                    with col3:
+                        st.metric("🔥 High Theta Contracts", high_theta_count)
+                    with col4:
+                        st.metric("🏃‍♂️ Overall Decay Speed", decay_speed)
+                    
+                    # Create sub-tabs for detailed analysis
+                    decay_tab1, decay_tab2, decay_tab3, decay_tab4 = st.tabs([
+                        "📉 Time Value Decay", "⚡ Theta Analysis", "📅 Expiry Risk", "💡 Decay Strategies"
+                    ])
+                    
+                    with decay_tab1:
+                        st.write("**📉 Time Value Decay Curves**")
+                        
+                        # Time Value Decay by Strike
+                        for option_type in decay_df['option_type'].unique():
+                            type_data = decay_df[decay_df['option_type'] == option_type]
+                            
+                            if not type_data.empty:
+                                fig_decay = go.Figure()
+                                
+                                # Group by strike price
+                                strikes = sorted(type_data['strike_price'].unique())[:10]  # Limit to 10 strikes for clarity
+                                colors = px.colors.qualitative.Set3
+                                
+                                for i, strike in enumerate(strikes):
+                                    strike_data = type_data[type_data['strike_price'] == strike].sort_values('days_to_expiry')
+                                    
+                                    if len(strike_data) >= 2:
+                                        fig_decay.add_trace(go.Scatter(
+                                            x=strike_data['days_to_expiry'],
+                                            y=strike_data['time_value'],
+                                            mode='lines+markers',
+                                            name=f"Strike ${strike:.1f}",
+                                            line=dict(color=colors[i % len(colors)], width=2),
+                                            hovertemplate='<b>Strike $%{fullData.name}</b><br>' +
+                                                        'DTE: %{x}<br>' +
+                                                        'Time Value: $%{y:.2f}<br>' +
+                                                        'Daily Theta: $%{customdata:.3f}<extra></extra>',
+                                            customdata=strike_data['estimated_theta']
+                                        ))
+                                
+                                # Add danger zone shading
+                                fig_decay.add_vrect(x0=0, x1=15, fillcolor="red", opacity=0.1, 
+                                                  annotation_text="Danger Zone")
+                                fig_decay.add_vrect(x0=15, x1=30, fillcolor="orange", opacity=0.1,
+                                                  annotation_text="Acceleration")
+                                
+                                fig_decay.update_layout(
+                                    title=f"{ticker_input} {option_type.upper()} Time Value Decay Curves",
+                                    xaxis_title="Days to Expiry",
+                                    yaxis_title="Time Value ($)",
+                                    height=400
+                                )
+                                
+                                st.plotly_chart(fig_decay, use_container_width=True)
+                    
+                    with decay_tab2:
+                        st.write("**⚡ Theta Heatmap & Analysis**")
+                        
+                        # Create theta heatmap
+                        heatmap_data = decay_df.pivot_table(
+                            values='estimated_theta',
+                            index='strike_price',
+                            columns='days_to_expiry',
+                            aggfunc='mean'
+                        )
+                        
+                        if not heatmap_data.empty:
+                            fig_heatmap = go.Figure(data=go.Heatmap(
+                                z=heatmap_data.values,
+                                x=[f"{int(d)} days" for d in heatmap_data.columns],
+                                y=[f"${s:.1f}" for s in heatmap_data.index],
+                                colorscale='Reds',
+                                colorbar=dict(title="Daily Theta ($)"),
+                                hovertemplate='Strike: %{y}<br>DTE: %{x}<br>Theta: $%{z:.3f}/day<extra></extra>'
+                            ))
+                            
+                            fig_heatmap.update_layout(
+                                title=f"{ticker_input} Theta Heatmap (Daily Decay)",
+                                xaxis_title="Days to Expiry",
+                                yaxis_title="Strike Price",
+                                height=500
+                            )
+                            
+                            st.plotly_chart(fig_heatmap, use_container_width=True)
+                        
+                        # High and Low Theta Tables
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.write("**🔥 Highest Theta (Fast Decay)**")
+                            high_theta = decay_df.nlargest(5, 'estimated_theta')[
+                                ['option_type', 'strike_price', 'days_to_expiry', 'estimated_theta', 'theta_efficiency', 'volume']
+                            ].copy()
+                            high_theta.columns = ['Type', 'Strike', 'DTE', 'Theta $/day', 'Efficiency %', 'Volume']
+                            high_theta = high_theta.round(2)
+                            st.dataframe(high_theta, hide_index=True)
+                        
+                        with col2:
+                            st.write("**❄️ Lowest Theta (Slow Decay)**")
+                            low_theta = decay_df[decay_df['estimated_theta'] > 0].nsmallest(5, 'estimated_theta')[
+                                ['option_type', 'strike_price', 'days_to_expiry', 'estimated_theta', 'theta_efficiency', 'volume']
+                            ].copy()
+                            low_theta.columns = ['Type', 'Strike', 'DTE', 'Theta $/day', 'Efficiency %', 'Volume']
+                            low_theta = low_theta.round(2)
+                            st.dataframe(low_theta, hide_index=True)
+                    
+                    with decay_tab3:
+                        st.write("**📅 Expiry Risk Calendar**")
+                        
+                        # Group by expiration date
+                        expiry_risk = decay_df.groupby('contract_date').agg({
+                            'estimated_theta': 'sum',
+                            'option_cost': 'sum',
+                            'volume': 'sum',
+                            'days_to_expiry': 'first'
+                        }).reset_index()
+                        
+                        # Classify risk level
+                        def classify_risk(dte):
+                            if dte <= 7:
+                                return '🚨 CRITICAL'
+                            elif dte <= 15:
+                                return '⚠️ HIGH'
+                            elif dte <= 30:
+                                return '⚡ MODERATE'
+                            else:
+                                return '✅ LOW'
+                        
+                        expiry_risk['risk_level'] = expiry_risk['days_to_expiry'].apply(classify_risk)
+                        expiry_risk = expiry_risk.sort_values('days_to_expiry')
+                        
+                        # Display risk calendar
+                        st.write("**Expiration Risk Levels**")
+                        
+                        for _, row in expiry_risk.iterrows():
+                            color = "red" if "CRITICAL" in row['risk_level'] else "orange" if "HIGH" in row['risk_level'] else "yellow" if "MODERATE" in row['risk_level'] else "green"
+                            
+                            with st.container():
+                                col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+                                with col1:
+                                    st.markdown(f"**{row['contract_date'].strftime('%Y-%m-%d')}** - {row['risk_level']}")
+                                with col2:
+                                    st.metric("DTE", f"{row['days_to_expiry']} days")
+                                with col3:
+                                    st.metric("Daily Theta", f"${row['estimated_theta']:.2f}")
+                                with col4:
+                                    st.metric("Total Premium", f"${row['option_cost']:.0f}")
+                        
+                        # Zone Analysis
+                        st.subheader("📊 Decay Zone Analysis")
+                        
+                        zone_analysis = decay_df.groupby('decay_zone').agg({
+                            'estimated_theta': ['sum', 'mean'],
+                            'option_cost': 'sum',
+                            'volume': 'sum',
+                            'days_to_expiry': 'count'
+                        }).round(2)
+                        
+                        zone_analysis.columns = ['Total Theta $/day', 'Avg Theta $/day', 'Total Premium', 'Total Volume', 'Contract Count']
+                        st.dataframe(zone_analysis)
+                        
+                        # Risk warnings
+                        critical_contracts = decay_df[decay_df['days_to_expiry'] <= 7]
+                        if not critical_contracts.empty:
+                            st.warning(f"⚠️ **{len(critical_contracts)} contracts in CRITICAL zone** - Consider closing or rolling these positions!")
+                    
+                    with decay_tab4:
+                        st.write("**💡 Decay Strategy Optimizer**")
+                        
+                        # Theta Harvesting Opportunities
+                        st.subheader("🎯 Theta Harvesting Opportunities")
+                        
+                        # Find optimal theta harvesting candidates (15-45 DTE sweet spot)
+                        theta_harvest = decay_df[
+                            (decay_df['days_to_expiry'] >= 15) & 
+                            (decay_df['days_to_expiry'] <= 45) &
+                            (decay_df['volume'] >= 10)
+                        ].copy()
+                        
+                        if not theta_harvest.empty:
+                            # Sort by theta efficiency
+                            best_theta_harvest = theta_harvest.nlargest(10, 'theta_efficiency')[
+                                ['option_type', 'strike_price', 'days_to_expiry', 'option_cost', 
+                                 'estimated_theta', 'theta_efficiency', 'volume']
+                            ].copy()
+                            
+                            best_theta_harvest.columns = ['Type', 'Strike', 'DTE', 'Premium', 'Theta $/day', 'Theta Efficiency %', 'Volume']
+                            best_theta_harvest = best_theta_harvest.round(2)
+                            
+                            st.write("**Top Premium Selling Candidates (15-45 DTE)**")
+                            st.dataframe(best_theta_harvest, hide_index=True)
+                            
+                            # Strategy recommendations
+                            col1, col2, col3 = st.columns(3)
+                            
+                            with col1:
+                                best_opportunity = best_theta_harvest.iloc[0]
+                                st.metric(
+                                    "Best Theta Play", 
+                                    f"${best_opportunity['Strike']} {best_opportunity['Type'].upper()}",
+                                    f"{best_opportunity['Theta Efficiency %']:.2f}% daily"
+                                )
+                            
+                            with col2:
+                                weekly_theta_risk = decay_df[decay_df['days_to_expiry'] <= 7]['estimated_theta'].sum()
+                                st.metric("Weekly Theta Risk", f"${weekly_theta_risk:.2f}/day")
+                            
+                            with col3:
+                                monthly_theta_income = decay_df[
+                                    (decay_df['days_to_expiry'] >= 15) & 
+                                    (decay_df['days_to_expiry'] <= 45)
+                                ]['estimated_theta'].sum()
+                                st.metric("Monthly Theta Income", f"${monthly_theta_income:.2f}/day")
+                        
+                        # Trading Insights
+                        st.subheader("📈 Trading Insights & Recommendations")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.success(f"""
+                            **For Premium Sellers:**
+                            - Focus on **30-45 DTE** options for optimal theta
+                            - Current best zone: **Steady Decay (31-60 DTE)**
+                            - Potential daily income: **${decay_df[decay_df['decay_zone'] == '🎯 Steady Decay Zone (31-60 DTE)']['estimated_theta'].sum():.2f}**
+                            - Close positions at **50% profit** or **21 DTE**
+                            """)
+                        
+                        with col2:
+                            st.info(f"""
+                            **For Premium Buyers:**
+                            - Consider **LEAPS (60+ DTE)** to minimize theta
+                            - Current slow decay options: **{len(decay_df[decay_df['days_to_expiry'] > 60])}**
+                            - Average daily burn in slow zone: **${decay_df[decay_df['decay_zone'] == '❄️ Slow Decay Zone (60+ DTE)']['estimated_theta'].mean():.3f}**
+                            - Time entries around **earnings/events**
+                            """)
+                        
+                        # Portfolio Theta Summary
+                        st.subheader("📊 Portfolio Theta Summary")
+                        
+                        total_theta = decay_df['estimated_theta'].sum()
+                        theta_by_type = decay_df.groupby('option_type')['estimated_theta'].sum()
+                        
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.metric("Total Daily Theta", f"${total_theta:.2f}")
+                        with col2:
+                            if 'call' in theta_by_type.index:
+                                st.metric("Call Theta", f"${theta_by_type['call']:.2f}/day")
+                        with col3:
+                            if 'put' in theta_by_type.index:
+                                st.metric("Put Theta", f"${theta_by_type['put']:.2f}/day")
+                        
+                        # Final recommendations
+                        if total_theta > 5:
+                            st.warning(f"⚠️ **High Theta Exposure**: You're losing ${total_theta:.2f} per day. Consider reducing time decay risk.")
+                        elif total_theta > 2:
+                            st.info(f"📊 **Moderate Theta Exposure**: Daily burn of ${total_theta:.2f} is manageable but monitor closely.")
+                        else:
+                            st.success(f"✅ **Low Theta Exposure**: Daily burn of ${total_theta:.2f} is minimal.")
+                
+                else:
+                    st.warning("No valid expiration data for time decay analysis")
+            
+                        # Tab 6: Greeks (renumbered)
+            
+            with tab7:
                 st.subheader("Options Greeks & Metrics")
                 
                 if 'impliedVolatility' in filtered_df.columns:
@@ -1169,7 +1500,7 @@ def main():
                             st.dataframe(puts_summary)
                         else:
                             st.info("No put options in filtered data")
-            
+
             # Tab 8: Data Table (renumbered)
             with tab8:
                 st.subheader("Complete Options Data")
