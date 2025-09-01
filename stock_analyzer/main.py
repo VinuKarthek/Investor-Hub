@@ -31,7 +31,7 @@ from modules.ui_components import (
     render_price_range_slider,
     render_volume_analysis,
     render_short_interest_analysis,
-    render_financial_ratios
+    render_financial_health_dashboard
 )
 
 # Page configuration
@@ -214,7 +214,7 @@ def render_basic_statistics(data, info, ticker):
             current_price, 
             shares_outstanding
         )
-        render_financial_ratios(ratios)
+        render_financial_health_dashboard(ratios, info)
 
 def render_advanced_analytics(data, info, ticker):
     """Render advanced analytics section"""
