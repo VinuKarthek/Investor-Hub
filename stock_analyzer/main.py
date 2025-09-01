@@ -510,20 +510,126 @@ def render_company_information(info):
             st.write(info['longBusinessSummary'])
 
 def render_welcome_screen():
-    """Render welcome screen when no data is loaded"""
-    st.info("👆 Enter a stock ticker in the sidebar and click 'Fetch Data' to begin analysis")
+    """Enhanced welcome screen with better guidance"""
+    st.markdown("""
+    <div style="text-align: center; padding: 2rem;">
+        <h2>🚀 Welcome to the Stock Financial Dashboard</h2>
+        <p style="font-size: 1.2em; color: #666;">
+            Get comprehensive financial analysis for any publicly traded stock
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Example tickers
-    st.subheader("Popular Stock Tickers")
-    example_tickers = {
-        "Technology": ["AAPL", "GOOGL", "MSFT", "TSLA", "NVDA"],
-        "Finance": ["JPM", "BAC", "WFC", "GS", "MS"],
-        "Healthcare": ["JNJ", "PFE", "UNH", "ABBV", "MRK"],
-        "Consumer": ["AMZN", "WMT", "HD", "MCD", "NKE"]
-    }
+    # Quick start guide
+    col1, col2 = st.columns([1, 1])
     
-    for sector, tickers in example_tickers.items():
-        st.write(f"**{sector}:** {', '.join(tickers)}")
+    with col1:
+        st.markdown("### 🎯 Quick Start")
+        st.markdown("""
+        1. **Enter a ticker** in the sidebar (e.g., AAPL, GOOGL)
+        2. **Select time period** for historical data
+        3. **Choose technical indicators** to display
+        4. **Click 'Fetch Data'** to load the dashboard
+        """)
+        
+        st.markdown("### 📊 What You'll Get")
+        st.markdown("""
+        - **Real-time stock data** and key metrics
+        - **Technical analysis** with interactive charts
+        - **Financial statements** and ratio analysis
+        - **Analyst ratings** and price targets
+        - **Industry comparisons** and benchmarks
+        """)
+    
+    with col2:
+        st.markdown("### 🔥 Popular Tickers")
+        
+        # Organized by category with better presentation
+        categories = {
+            "💻 Technology": ["AAPL", "GOOGL", "MSFT", "TSLA", "NVDA", "META"],
+            "🏦 Finance": ["JPM", "BAC", "WFC", "GS", "MS", "C"],
+            "🏥 Healthcare": ["JNJ", "PFE", "UNH", "ABBV", "MRK", "BMY"],
+            "🛒 Consumer": ["AMZN", "WMT", "HD", "MCD", "NKE", "COST"],
+            "🏭 Industrial": ["BA", "CAT", "GE", "MMM", "HON", "UPS"],
+            "⚡ Energy": ["XOM", "CVX", "COP", "EOG", "SLB", "MPC"]
+        }
+        
+        for category, tickers in categories.items():
+            with st.expander(category, expanded=False):
+                # Create clickable ticker buttons
+                cols = st.columns(3)
+                for i, ticker in enumerate(tickers):
+                    with cols[i % 3]:
+                        if st.button(ticker, key=f"example_{ticker}"):
+                            # Auto-fill the sidebar with selected ticker
+                            st.session_state['auto_ticker'] = ticker
+                            st.rerun()
+    
+    # Features highlight
+    st.markdown("---")
+    st.markdown("### ✨ Dashboard Features")
+    
+    feature_cols = st.columns(4)
+    
+    with feature_cols[0]:
+        st.markdown("""
+        **📈 Overview**
+        - Current price & metrics
+        - 52-week range analysis
+        - Volume & liquidity
+        - Financial health score
+        """)
+    
+    with feature_cols[1]:
+        st.markdown("""
+        **📊 Technical Analysis**
+        - Interactive candlestick charts
+        - Moving averages
+        - Bollinger bands
+        - Technical indicators
+        """)
+    
+    with feature_cols[2]:
+        st.markdown("""
+        **💰 Financial Performance**
+        - Income statements
+        - Balance sheets
+        - Historical trends
+        - Advanced visualizations
+        """)
+    
+    with feature_cols[3]:
+        st.markdown("""
+        **🎯 Analytics & Ratings**
+        - EPS analysis
+        - Dividend history
+        - Analyst recommendations
+        - Industry comparisons
+        """)
+    
+    # Tips section
+    st.markdown("---")
+    st.markdown("### 💡 Pro Tips")
+    
+    tips_col1, tips_col2 = st.columns(2)
+    
+    with tips_col1:
+        st.info("""
+        **📊 For Best Analysis:**
+        - Use 1-year+ periods for trend analysis
+        - Compare with industry benchmarks
+        - Check multiple timeframes
+        - Review analyst consensus
+        """)
+    
+    with tips_col2:
+        st.warning("""
+        **⚠️ Important Notes:**
+        - Data is for informational purposes only
+        - Not financial advice
+        - Always do your own research
+        - Consider multiple data sources
+        """)
 
 if __name__ == "__main__":
     main()
