@@ -5,12 +5,23 @@ Run this file to start the dashboard: streamlit run main.py
 
 import streamlit as st
 from datetime import datetime
+import pandas as pd
 import warnings
 warnings.filterwarnings('ignore')
 
 # Import custom modules
-from modules.data_fetcher import get_stock_data, get_financial_statements, get_analyst_recommendations
-from modules.technical_analysis import calculate_technical_indicators, create_candlestick_chart
+from modules.data_fetcher import (
+    get_stock_data, get_financial_statements, 
+    get_analyst_recommendations
+)
+from modules.technical_analysis import (
+    calculate_technical_indicators, 
+    create_candlestick_chart,
+    create_rsi_chart,
+    create_macd_chart,
+    get_technical_signals,
+    get_support_resistance_levels
+)
 from modules.financial_charts import (
     create_combined_income_chart, 
     create_combined_balance_sheet_chart,
@@ -323,63 +334,275 @@ def render_overview_tab(data, info, ticker):
     st.markdown('</div>', unsafe_allow_html=True)
 
 def render_technical_tab(data, ticker):
-    """Render technical analysis tab"""
+    """Enhanced render technical analysis tab with all available indicators"""
     st.markdown('<div class="tab-content">', unsafe_allow_html=True)
     
     st.subheader("📊 Technical Analysis")
     
-    # Technical indicators controls
-    col1, col2, col3 = st.columns([1, 1, 2])
+    # Enhanced technical indicators controls
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
     with col1:
         show_sma = st.checkbox("Moving Averages", value=st.session_state.get('show_sma', False))
     with col2:
         show_bollinger = st.checkbox("Bollinger Bands", value=st.session_state.get('show_bollinger', False))
+    with col3:
+        show_volume = st.checkbox("Volume", value=st.session_state.get('show_volume', True))
+    with col4:
+        show_indicators = st.checkbox("Show RSI & MACD", value=st.session_state.get('show_indicators', False))
     
     # Main candlestick chart
-    candlestick_fig = create_candlestick_chart(data, ticker, show_sma, show_bollinger)
+    candlestick_fig = create_candlestick_chart(data, ticker, show_sma, show_bollinger, show_volume)
     st.plotly_chart(candlestick_fig, use_container_width=True)
     
-    # Technical indicators summary
+    # Additional indicator charts if requested
+    if show_indicators:
+        col1, col2 = st.columns(2)
+        with col1:
+            if 'RSI' in data.columns:
+                rsi_fig = create_rsi_chart(data, ticker)
+                st.plotly_chart(rsi_fig, use_container_width=True)
+        
+        with col2:
+            if 'MACD' in data.columns:
+                macd_fig = create_macd_chart(data, ticker)
+                st.plotly_chart(macd_fig, use_container_width=True)
+    
+    # Enhanced technical indicators summary
     render_technical_summary(data)
+    
+    # Trading signals section
+    render_trading_signals(data)
+    
+    # Support/Resistance levels
+    render_support_resistance(data)
     
     st.markdown('</div>', unsafe_allow_html=True)
 
 def render_technical_summary(data):
-    """Render technical indicators summary"""
+    """Enhanced technical indicators summary with all available indicators"""
     st.subheader("📋 Technical Indicators Summary")
     
+    # First row - Price action indicators
     col1, col2, col3, col4 = st.columns(4)
     
+    current_price = data['Close'].iloc[-1]
+    
     with col1:
-        if 'SMA_20' in data.columns:
-            current_price = data['Close'].iloc[-1]
+        if 'SMA_20' in data.columns and pd.notna(data['SMA_20'].iloc[-1]):
             sma_20 = data['SMA_20'].iloc[-1]
             sma_signal = "🟢 Above" if current_price > sma_20 else "🔴 Below"
             st.metric("vs SMA 20", sma_signal, f"${abs(current_price - sma_20):.2f}")
+        else:
+            st.metric("SMA 20", "N/A", "Calculating...")
     
     with col2:
-        if 'SMA_50' in data.columns:
+        if 'SMA_50' in data.columns and pd.notna(data['SMA_50'].iloc[-1]):
             sma_50 = data['SMA_50'].iloc[-1]
             sma_signal = "🟢 Above" if current_price > sma_50 else "🔴 Below"
             st.metric("vs SMA 50", sma_signal, f"${abs(current_price - sma_50):.2f}")
+        else:
+            st.metric("SMA 50", "N/A", "Calculating...")
     
     with col3:
-        if 'RSI' in data.columns:
+        if 'RSI' in data.columns and pd.notna(data['RSI'].iloc[-1]):
             rsi = data['RSI'].iloc[-1]
             if rsi > 70:
                 rsi_signal = "🔴 Overbought"
+                rsi_color = "inverse"
             elif rsi < 30:
                 rsi_signal = "🟢 Oversold"
+                rsi_color = "normal"
             else:
                 rsi_signal = "🟡 Neutral"
-            st.metric("RSI", f"{rsi:.1f}", rsi_signal)
+                rsi_color = "off"
+            st.metric("RSI (14)", f"{rsi:.1f}", rsi_signal, delta_color=rsi_color)
+        else:
+            st.metric("RSI", "N/A", "Calculating...")
     
     with col4:
         # Volume trend
-        volume_avg = data['Volume'].rolling(20).mean().iloc[-1]
-        current_volume = data['Volume'].iloc[-1]
-        volume_signal = "🟢 High" if current_volume > volume_avg * 1.5 else "🟡 Normal"
-        st.metric("Volume", volume_signal, f"{((current_volume/volume_avg - 1) * 100):+.1f}%")
+        if 'Volume_SMA' in data.columns and pd.notna(data['Volume_SMA'].iloc[-1]):
+            volume_avg = data['Volume_SMA'].iloc[-1]
+            current_volume = data['Volume'].iloc[-1]
+            volume_ratio = current_volume / volume_avg
+            if volume_ratio > 1.5:
+                volume_signal = "🟢 High"
+                volume_color = "normal"
+            elif volume_ratio < 0.5:
+                volume_signal = "🔴 Low"
+                volume_color = "inverse"
+            else:
+                volume_signal = "🟡 Normal"
+                volume_color = "off"
+            st.metric("Volume", volume_signal, f"{((volume_ratio - 1) * 100):+.1f}%", delta_color=volume_color)
+        else:
+            st.metric("Volume", "Normal", "0%")
+
+    # Second row - Advanced indicators
+    st.markdown("---")
+    col5, col6, col7, col8 = st.columns(4)
+    
+    with col5:
+        # MACD Signal
+        if all(col in data.columns for col in ['MACD', 'MACD_Signal']) and pd.notna(data['MACD'].iloc[-1]):
+            macd = data['MACD'].iloc[-1]
+            macd_signal = data['MACD_Signal'].iloc[-1]
+            if macd > macd_signal:
+                macd_status = "🟢 Bullish"
+                macd_color = "normal"
+            else:
+                macd_status = "🔴 Bearish"
+                macd_color = "inverse"
+            st.metric("MACD", macd_status, f"{(macd - macd_signal):.4f}", delta_color=macd_color)
+        else:
+            st.metric("MACD", "N/A", "Calculating...")
+    
+    with col6:
+        # Bollinger Bands Position
+        if all(col in data.columns for col in ['BB_Upper', 'BB_Lower', 'BB_Middle']) and pd.notna(data['BB_Middle'].iloc[-1]):
+            bb_upper = data['BB_Upper'].iloc[-1]
+            bb_lower = data['BB_Lower'].iloc[-1]
+            bb_middle = data['BB_Middle'].iloc[-1]
+            
+            if current_price > bb_upper:
+                bb_signal = "🔴 Above Upper"
+                bb_color = "inverse"
+            elif current_price < bb_lower:
+                bb_signal = "🟢 Below Lower"
+                bb_color = "normal"
+            else:
+                bb_signal = "🟡 In Range"
+                bb_color = "off"
+            
+            # Calculate position within bands (0-100%)
+            bb_position = ((current_price - bb_lower) / (bb_upper - bb_lower)) * 100
+            st.metric("Bollinger Bands", bb_signal, f"{bb_position:.1f}%", delta_color=bb_color)
+        else:
+            st.metric("Bollinger Bands", "N/A", "Calculating...")
+    
+    with col7:
+        # ATR (Volatility)
+        if 'ATR' in data.columns and pd.notna(data['ATR'].iloc[-1]):
+            atr = data['ATR'].iloc[-1]
+            atr_pct = (atr / current_price) * 100
+            if atr_pct > 3:
+                atr_signal = "🔴 High Volatility"
+            elif atr_pct < 1:
+                atr_signal = "🟢 Low Volatility"
+            else:
+                atr_signal = "🟡 Normal Volatility"
+            st.metric("ATR", atr_signal, f"{atr_pct:.2f}%")
+        else:
+            st.metric("ATR", "N/A", "Calculating...")
+    
+    with col8:
+        # Price Change
+        if 'Price_Change' in data.columns and pd.notna(data['Price_Change'].iloc[-1]):
+            price_change = data['Price_Change'].iloc[-1] * 100
+            if abs(price_change) > 2:
+                change_signal = "🔴 High Move" if price_change > 0 else "🔴 Sharp Drop"
+                change_color = "normal" if price_change > 0 else "inverse"
+            else:
+                change_signal = "🟡 Normal"
+                change_color = "off"
+            st.metric("Daily Change", change_signal, f"{price_change:+.2f}%", delta_color=change_color)
+        else:
+            daily_change = ((current_price - data['Close'].iloc[-2]) / data['Close'].iloc[-2]) * 100
+            st.metric("Daily Change", "🟡 Normal", f"{daily_change:+.2f}%")
+
+def render_trading_signals(data):
+    """Render trading signals section"""
+    st.subheader("🎯 Trading Signals")
+    
+    signals = get_technical_signals(data)
+    
+    if signals:
+        # Create columns for different signal types
+        signal_cols = st.columns(len(signals))
+        
+        for i, (indicator, signal) in enumerate(signals.items()):
+            with signal_cols[i]:
+                # Color coding for signals
+                if 'Bullish' in signal or 'Buy' in signal or 'Oversold' in signal:
+                    st.success(f"**{indicator}**\n\n{signal}")
+                elif 'Bearish' in signal or 'Sell' in signal or 'Overbought' in signal:
+                    st.error(f"**{indicator}**\n\n{signal}")
+                else:
+                    st.info(f"**{indicator}**\n\n{signal}")
+    else:
+        st.info("Calculating trading signals...")
+
+def render_support_resistance(data):
+    """Render support and resistance levels"""
+    st.subheader("📊 Support & Resistance Levels")
+    
+    try:
+        levels = get_support_resistance_levels(data)
+        current_price = data['Close'].iloc[-1]
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            resistance_diff = levels['strong_resistance'] - current_price
+            st.metric(
+                "Strong Resistance", 
+                f"${levels['strong_resistance']:.2f}",
+                f"+${resistance_diff:.2f} ({(resistance_diff/current_price)*100:+.1f}%)"
+            )
+        
+        with col2:
+            resistance_diff = levels['resistance'] - current_price
+            st.metric(
+                "Resistance", 
+                f"${levels['resistance']:.2f}",
+                f"+${resistance_diff:.2f} ({(resistance_diff/current_price)*100:+.1f}%)"
+            )
+        
+        with col3:
+            support_diff = current_price - levels['support']
+            st.metric(
+                "Support", 
+                f"${levels['support']:.2f}",
+                f"-${support_diff:.2f} ({(support_diff/current_price)*100:+.1f}%)"
+            )
+        
+        with col4:
+            strong_support_diff = current_price - levels['strong_support']
+            st.metric(
+                "Strong Support", 
+                f"${levels['strong_support']:.2f}",
+                f"-${strong_support_diff:.2f} ({(strong_support_diff/current_price)*100:+.1f}%)"
+            )
+            
+    except Exception as e:
+        st.info("Calculating support and resistance levels...")
+
+def render_volatility_metrics(data):
+    """Render volatility metrics (optional addition)"""
+    st.subheader("📈 Volatility Analysis")
+    
+    try:
+        volatility_metrics = calculate_volatility_metrics(data)
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            daily_vol = volatility_metrics['daily_volatility'] * 100
+            st.metric("Daily Volatility", f"{daily_vol:.2f}%")
+        
+        with col2:
+            annual_vol = volatility_metrics['annualized_volatility'] * 100
+            st.metric("Annualized Volatility", f"{annual_vol:.1f}%")
+        
+        with col3:
+            if volatility_metrics['average_true_range']:
+                atr_val = volatility_metrics['average_true_range']
+                st.metric("Average True Range", f"${atr_val:.2f}")
+            else:
+                st.metric("Average True Range", "Calculating...")
+                
+    except Exception as e:
+        st.info("Calculating volatility metrics...")
 
 def render_financial_tab():
     """Render financial performance tab"""

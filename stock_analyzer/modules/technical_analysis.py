@@ -1,6 +1,6 @@
 """
-Technical Analysis Module
-Handles all technical indicators and chart creation
+Optimized Technical Analysis Module
+Handles all technical indicators and chart creation using established libraries
 """
 
 import pandas as pd
@@ -9,101 +9,171 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 
+# Try to import technical analysis libraries
+try:
+    import talib
+    TALIB_AVAILABLE = True
+except ImportError:
+    TALIB_AVAILABLE = False
+    
+try:
+    import pandas_ta as ta
+    PANDAS_TA_AVAILABLE = True
+except ImportError:
+    PANDAS_TA_AVAILABLE = False
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def calculate_technical_indicators(data):
     """
-    Calculate technical indicators for stock data
-    
-    Args:
-        data (pd.DataFrame): Stock OHLCV data
-        
-    Returns:
-        pd.DataFrame: Data with technical indicators added
+    Calculate technical indicators using optimized libraries
     """
-    # Simple Moving Averages
-    data['SMA_20'] = data['Close'].rolling(window=20).mean()
-    data['SMA_50'] = data['Close'].rolling(window=50).mean()
+    df = data.copy()
     
-    # Bollinger Bands
-    data['BB_Middle'] = data['Close'].rolling(window=20).mean()
-    bb_std = data['Close'].rolling(window=20).std()
-    data['BB_Upper'] = data['BB_Middle'] + (bb_std * 2)
-    data['BB_Lower'] = data['BB_Middle'] - (bb_std * 2)
-    
-    # RSI (Relative Strength Index)
-    data['RSI'] = calculate_rsi(data['Close'])
-    
-    # MACD
-    data['MACD'], data['MACD_Signal'] = calculate_macd(data['Close'])
+    if TALIB_AVAILABLE:
+        # Use TA-Lib (fastest and most accurate)
+        df['SMA_20'] = talib.SMA(df['Close'].values, timeperiod=20)
+        df['SMA_50'] = talib.SMA(df['Close'].values, timeperiod=50)
+        df['RSI'] = talib.RSI(df['Close'].values, timeperiod=14)
+        
+        # Bollinger Bands
+        df['BB_Upper'], df['BB_Middle'], df['BB_Lower'] = talib.BBANDS(
+            df['Close'].values, timeperiod=20, nbdevup=2, nbdevdn=2, matype=0
+        )
+        
+        # MACD
+        df['MACD'], df['MACD_Signal'], df['MACD_Hist'] = talib.MACD(
+            df['Close'].values, fastperiod=12, slowperiod=26, signalperiod=9
+        )
+        
+        # Additional indicators
+        df['ATR'] = talib.ATR(df['High'].values, df['Low'].values, df['Close'].values, timeperiod=14)
+        
+    elif PANDAS_TA_AVAILABLE:
+        # Use Pandas-TA as fallback
+        df.ta.sma(length=20, append=True)
+        df.ta.sma(length=50, append=True)
+        df.ta.rsi(length=14, append=True)
+        df.ta.bbands(length=20, std=2, append=True)
+        df.ta.macd(fast=12, slow=26, signal=9, append=True)
+        df.ta.atr(length=14, append=True)
+        
+        # Rename columns to match expected format
+        column_mapping = {
+            'SMA_20': 'SMA_20',
+            'SMA_50': 'SMA_50',
+            'RSI_14': 'RSI',
+            'BBL_20_2.0': 'BB_Lower',
+            'BBM_20_2.0': 'BB_Middle',
+            'BBU_20_2.0': 'BB_Upper',
+            'MACD_12_26_9': 'MACD',
+            'MACDs_12_26_9': 'MACD_Signal',
+            'MACDh_12_26_9': 'MACD_Hist',
+            'ATRr_14': 'ATR'
+        }
+        
+        for old_name, new_name in column_mapping.items():
+            if old_name in df.columns:
+                df[new_name] = df[old_name]
+        
+    else:
+        # Fallback to optimized custom implementations
+        df = _calculate_indicators_custom(df)
     
     # Volume indicators
-    data['Volume_SMA'] = data['Volume'].rolling(window=20).mean()
+    df['Volume_SMA'] = df['Volume'].rolling(window=20, min_periods=1).mean()
+    df['Price_Change'] = df['Close'].pct_change()
     
-    # Price change
-    data['Price_Change'] = data['Close'].pct_change()
-    
-    return data
+    return df
 
-def calculate_rsi(prices, window=14):
-    """
-    Calculate Relative Strength Index
+def _calculate_indicators_custom(df):
+    """Optimized custom implementations as fallback"""
+    close = df['Close']
+    high = df['High']
+    low = df['Low']
     
-    Args:
-        prices (pd.Series): Price series
-        window (int): RSI calculation window
-        
-    Returns:
-        pd.Series: RSI values
-    """
+    # Moving averages
+    df['SMA_20'] = close.rolling(20, min_periods=1).mean()
+    df['SMA_50'] = close.rolling(50, min_periods=1).mean()
+    
+    # Bollinger Bands
+    df['BB_Middle'] = df['SMA_20']
+    bb_std = close.rolling(20, min_periods=1).std()
+    df['BB_Upper'] = df['BB_Middle'] + (bb_std * 2)
+    df['BB_Lower'] = df['BB_Middle'] - (bb_std * 2)
+    
+    # RSI (optimized)
+    df['RSI'] = _calculate_rsi_optimized(close)
+    
+    # MACD (optimized)
+    df['MACD'], df['MACD_Signal'] = _calculate_macd_optimized(close)
+    
+    # ATR
+    df['ATR'] = _calculate_atr_optimized(high, low, close)
+    
+    return df
+
+def _calculate_rsi_optimized(prices, window=14):
+    """Optimized RSI calculation"""
     delta = prices.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-    rs = gain / loss
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+    
+    avg_gain = gain.ewm(com=window-1, min_periods=window).mean()
+    avg_loss = loss.ewm(com=window-1, min_periods=window).mean()
+    
+    rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-def calculate_macd(prices, fast=12, slow=26, signal=9):
-    """
-    Calculate MACD indicator
-    
-    Args:
-        prices (pd.Series): Price series
-        fast (int): Fast EMA period
-        slow (int): Slow EMA period
-        signal (int): Signal line EMA period
-        
-    Returns:
-        tuple: (MACD line, Signal line)
-    """
-    ema_fast = prices.ewm(span=fast).mean()
-    ema_slow = prices.ewm(span=slow).mean()
+def _calculate_macd_optimized(prices, fast=12, slow=26, signal=9):
+    """Optimized MACD calculation"""
+    ema_fast = prices.ewm(span=fast, min_periods=fast).mean()
+    ema_slow = prices.ewm(span=slow, min_periods=slow).mean()
     macd = ema_fast - ema_slow
-    signal_line = macd.ewm(span=signal).mean()
+    signal_line = macd.ewm(span=signal, min_periods=signal).mean()
     return macd, signal_line
 
+def _calculate_atr_optimized(high, low, close, window=14):
+    """Optimized ATR calculation"""
+    prev_close = close.shift(1)
+    tr1 = high - low
+    tr2 = abs(high - prev_close)
+    tr3 = abs(low - prev_close)
+    
+    true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    atr = true_range.ewm(span=window, min_periods=window).mean()
+    return atr
+
+@st.cache_data(ttl=300)
 def create_candlestick_chart(data, ticker, show_sma=False, show_bollinger=False, show_volume=True):
     """
-    Create interactive candlestick chart with technical indicators
-    
-    Args:
-        data (pd.DataFrame): Stock OHLCV data with indicators
-        ticker (str): Stock ticker symbol
-        show_sma (bool): Whether to show moving averages
-        show_bollinger (bool): Whether to show Bollinger Bands
-        show_volume (bool): Whether to show volume chart
-        
-    Returns:
-        plotly.graph_objects.Figure: Interactive candlestick chart
+    Create optimized candlestick chart with technical indicators
     """
-    rows = 2 if show_volume else 1
+    indicators = {
+        'sma': show_sma,
+        'bollinger': show_bollinger,
+        'volume': show_volume
+    }
+    
+    # Determine subplot configuration
+    rows = 1
+    subplot_titles = [f'{ticker} Stock Price']
+    row_heights = [1.0]
+    
+    if show_volume:
+        rows += 1
+        subplot_titles.append('Volume')
+        row_heights = [0.7, 0.3]
+    
     fig = make_subplots(
         rows=rows, cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.1,
-        subplot_titles=(f'{ticker} Stock Price', 'Volume') if show_volume else (f'{ticker} Stock Price',),
-        row_heights=[0.7, 0.3] if show_volume else [1.0]
+        vertical_spacing=0.05,
+        subplot_titles=subplot_titles,
+        row_heights=row_heights
     )
     
-    # Candlestick chart
+    # Main candlestick chart
     fig.add_trace(
         go.Candlestick(
             x=data.index,
@@ -112,124 +182,104 @@ def create_candlestick_chart(data, ticker, show_sma=False, show_bollinger=False,
             low=data['Low'],
             close=data['Close'],
             name='OHLC',
-            increasing_line_color='#00ff00',
-            decreasing_line_color='#ff0000'
+            increasing_line_color='#26a69a',
+            decreasing_line_color='#ef5350'
         ),
         row=1, col=1
     )
     
-    # Add technical indicators if selected
-    if show_sma:
-        fig.add_trace(
-            go.Scatter(
-                x=data.index, 
-                y=data['SMA_20'], 
-                name='SMA 20',
-                line=dict(color='orange', width=2),
-                opacity=0.8
-            ),
-            row=1, col=1
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=data.index, 
-                y=data['SMA_50'], 
-                name='SMA 50',
-                line=dict(color='red', width=2),
-                opacity=0.8
-            ),
-            row=1, col=1
-        )
+    # Add indicators
+    _add_price_indicators(fig, data, indicators)
     
-    if show_bollinger:
-        fig.add_trace(
-            go.Scatter(
-                x=data.index, 
-                y=data['BB_Upper'], 
-                name='BB Upper',
-                line=dict(color='gray', width=1, dash='dash'),
-                showlegend=False,
-                opacity=0.5
-            ),
-            row=1, col=1
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=data.index, 
-                y=data['BB_Lower'], 
-                name='BB Lower',
-                line=dict(color='gray', width=1, dash='dash'),
-                fill='tonexty',
-                fillcolor='rgba(128,128,128,0.1)',
-                showlegend=False,
-                opacity=0.5
-            ),
-            row=1, col=1
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=data.index, 
-                y=data['BB_Middle'], 
-                name='BB Middle',
-                line=dict(color='blue', width=1, dash='dot'),
-                opacity=0.7
-            ),
-            row=1, col=1
-        )
-    
-    # Volume chart
+    # Add volume if requested
     if show_volume:
-        colors = ['red' if close < open else 'green' for close, open in zip(data['Close'], data['Open'])]
-        fig.add_trace(
-            go.Bar(
-                x=data.index,
-                y=data['Volume'],
-                name='Volume',
-                marker_color=colors,
-                opacity=0.7
-            ),
-            row=2, col=1
-        )
+        _add_volume_chart(fig, data, rows)
     
-    # Update layout
+    # Optimize layout
     fig.update_layout(
         title=f'{ticker} Technical Analysis',
-        yaxis_title='Stock Price (USD)',
         template='plotly_white',
-        height=700 if show_volume else 500,
+        height=600 if show_volume else 400,
         showlegend=True,
-        hovermode='x unified'
+        hovermode='x unified',
+        xaxis_rangeslider_visible=False,
+        margin=dict(l=0, r=0, t=30, b=0)
     )
     
-    # Remove rangeslider
-    fig.update_xaxes(rangeslider_visible=False)
-    
     # Add grid
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='lightgray')
+    fig.update_xaxes(showgrid=True, gridwidth=0.5, gridcolor='rgba(128,128,128,0.2)')
+    fig.update_yaxes(showgrid=True, gridwidth=0.5, gridcolor='rgba(128,128,128,0.2)')
     
     return fig
 
-def create_rsi_chart(data, ticker):
-    """
-    Create RSI indicator chart
+def _add_price_indicators(fig, data, indicators):
+    """Add price-based indicators to the chart"""
+    if indicators.get('sma', False):
+        if 'SMA_20' in data.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=data.index, y=data['SMA_20'], 
+                    name='SMA 20', line=dict(color='orange', width=1.5),
+                    opacity=0.8
+                ), row=1, col=1
+            )
+        if 'SMA_50' in data.columns:
+            fig.add_trace(
+                go.Scatter(
+                    x=data.index, y=data['SMA_50'], 
+                    name='SMA 50', line=dict(color='red', width=1.5),
+                    opacity=0.8
+                ), row=1, col=1
+            )
     
-    Args:
-        data (pd.DataFrame): Stock data with RSI
-        ticker (str): Stock ticker symbol
-        
-    Returns:
-        plotly.graph_objects.Figure: RSI chart
-    """
+    if indicators.get('bollinger', False):
+        if all(col in data.columns for col in ['BB_Upper', 'BB_Lower', 'BB_Middle']):
+            fig.add_trace(
+                go.Scatter(
+                    x=data.index, y=data['BB_Upper'], 
+                    name='BB Upper', line=dict(color='gray', width=1),
+                    showlegend=False, opacity=0.5
+                ), row=1, col=1
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=data.index, y=data['BB_Lower'], 
+                    name='BB Lower', line=dict(color='gray', width=1),
+                    fill='tonexty', fillcolor='rgba(128,128,128,0.1)',
+                    showlegend=False, opacity=0.5
+                ), row=1, col=1
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=data.index, y=data['BB_Middle'], 
+                    name='BB Middle', line=dict(color='blue', width=1, dash='dot'),
+                    opacity=0.7
+                ), row=1, col=1
+            )
+
+def _add_volume_chart(fig, data, row):
+    """Add volume chart efficiently"""
+    colors = np.where(data['Close'] >= data['Open'], '#26a69a', '#ef5350')
+    
+    fig.add_trace(
+        go.Bar(
+            x=data.index, y=data['Volume'],
+            name='Volume', marker_color=colors,
+            opacity=0.7, showlegend=False
+        ), row=row, col=1
+    )
+
+def create_rsi_chart(data, ticker):
+    """Create RSI indicator chart"""
     fig = go.Figure()
     
-    # RSI line
-    fig.add_trace(go.Scatter(
-        x=data.index,
-        y=data['RSI'],
-        name='RSI',
-        line=dict(color='purple', width=2)
-    ))
+    if 'RSI' in data.columns:
+        fig.add_trace(go.Scatter(
+            x=data.index,
+            y=data['RSI'],
+            name='RSI',
+            line=dict(color='purple', width=2)
+        ))
     
     # Overbought/Oversold lines
     fig.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Overbought (70)")
@@ -248,45 +298,41 @@ def create_rsi_chart(data, ticker):
     return fig
 
 def create_macd_chart(data, ticker):
-    """
-    Create MACD indicator chart
-    
-    Args:
-        data (pd.DataFrame): Stock data with MACD
-        ticker (str): Stock ticker symbol
-        
-    Returns:
-        plotly.graph_objects.Figure: MACD chart
-    """
+    """Create MACD indicator chart"""
     fig = go.Figure()
     
-    # MACD line
-    fig.add_trace(go.Scatter(
-        x=data.index,
-        y=data['MACD'],
-        name='MACD',
-        line=dict(color='blue', width=2)
-    ))
-    
-    # Signal line
-    fig.add_trace(go.Scatter(
-        x=data.index,
-        y=data['MACD_Signal'],
-        name='Signal',
-        line=dict(color='red', width=2)
-    ))
-    
-    # Histogram (MACD - Signal)
-    histogram = data['MACD'] - data['MACD_Signal']
-    colors = ['green' if x >= 0 else 'red' for x in histogram]
-    
-    fig.add_trace(go.Bar(
-        x=data.index,
-        y=histogram,
-        name='Histogram',
-        marker_color=colors,
-        opacity=0.6
-    ))
+    if 'MACD' in data.columns and 'MACD_Signal' in data.columns:
+        # MACD line
+        fig.add_trace(go.Scatter(
+            x=data.index,
+            y=data['MACD'],
+            name='MACD',
+            line=dict(color='blue', width=2)
+        ))
+        
+        # Signal line
+        fig.add_trace(go.Scatter(
+            x=data.index,
+            y=data['MACD_Signal'],
+            name='Signal',
+            line=dict(color='red', width=2)
+        ))
+        
+        # Histogram
+        if 'MACD_Hist' in data.columns:
+            histogram = data['MACD_Hist']
+        else:
+            histogram = data['MACD'] - data['MACD_Signal']
+            
+        colors = ['green' if x >= 0 else 'red' for x in histogram]
+        
+        fig.add_trace(go.Bar(
+            x=data.index,
+            y=histogram,
+            name='Histogram',
+            marker_color=colors,
+            opacity=0.6
+        ))
     
     fig.update_layout(
         title=f'{ticker} MACD',
@@ -298,25 +344,92 @@ def create_macd_chart(data, ticker):
     
     return fig
 
-def get_support_resistance_levels(data, window=20):
+def get_technical_signals(data):
     """
-    Calculate support and resistance levels
+    Generate comprehensive technical signals with scoring
+    """
+    signals = {}
+    total_score = 0
+    max_score = 0
     
-    Args:
-        data (pd.DataFrame): Stock OHLC data
-        window (int): Window for calculating levels
+    # RSI Signal (Weight: 2)
+    if 'RSI' in data.columns:
+        rsi = data['RSI'].iloc[-1]
+        if pd.notna(rsi):
+            if rsi > 70:
+                signals['RSI'] = 'Overbought - Consider Sell'
+                total_score -= 2
+            elif rsi < 30:
+                signals['RSI'] = 'Oversold - Consider Buy'
+                total_score += 2
+            else:
+                signals['RSI'] = 'Neutral'
+            max_score += 2
+    
+    # MACD Signal (Weight: 2)
+    if all(col in data.columns for col in ['MACD', 'MACD_Signal']):
+        macd = data['MACD'].iloc[-1]
+        macd_signal = data['MACD_Signal'].iloc[-1]
+        if pd.notna(macd) and pd.notna(macd_signal):
+            if macd > macd_signal:
+                signals['MACD'] = 'Bullish - MACD above signal'
+                total_score += 2
+            else:
+                signals['MACD'] = 'Bearish - MACD below signal'
+                total_score -= 2
+            max_score += 2
+    
+    # Moving Average Signal (Weight: 1)
+    if all(col in data.columns for col in ['SMA_20', 'SMA_50']):
+        price = data['Close'].iloc[-1]
+        sma_20 = data['SMA_20'].iloc[-1]
+        sma_50 = data['SMA_50'].iloc[-1]
         
-    Returns:
-        dict: Support and resistance levels
-    """
+        if pd.notna(sma_20) and pd.notna(sma_50):
+            if price > sma_20 > sma_50:
+                signals['Moving_Average'] = 'Bullish - Price above both MAs'
+                total_score += 1
+            elif price < sma_20 < sma_50:
+                signals['Moving_Average'] = 'Bearish - Price below both MAs'
+                total_score -= 1
+            else:
+                signals['Moving_Average'] = 'Mixed signals'
+            max_score += 1
+    
+    # Bollinger Bands Signal
+    if all(col in data.columns for col in ['BB_Upper', 'BB_Lower']):
+        price = data['Close'].iloc[-1]
+        bb_upper = data['BB_Upper'].iloc[-1]
+        bb_lower = data['BB_Lower'].iloc[-1]
+        
+        if pd.notna(bb_upper) and pd.notna(bb_lower):
+            if price > bb_upper:
+                signals['Bollinger_Bands'] = 'Overbought - Price above upper band'
+            elif price < bb_lower:
+                signals['Bollinger_Bands'] = 'Oversold - Price below lower band'
+            else:
+                signals['Bollinger_Bands'] = 'Normal range'
+    
+    # Overall sentiment
+    if max_score > 0:
+        sentiment_score = total_score / max_score
+        if sentiment_score > 0.3:
+            signals['Overall_Sentiment'] = 'Bullish'
+        elif sentiment_score < -0.3:
+            signals['Overall_Sentiment'] = 'Bearish'
+        else:
+            signals['Overall_Sentiment'] = 'Neutral'
+    
+    return signals
+
+# Keep some of your original functions that are still useful
+def get_support_resistance_levels(data, window=20):
+    """Calculate support and resistance levels"""
     highs = data['High'].rolling(window=window).max()
     lows = data['Low'].rolling(window=window).min()
     
-    # Get recent levels
     recent_high = highs.iloc[-1]
     recent_low = lows.iloc[-1]
-    
-    # Calculate additional levels based on price action
     price_range = recent_high - recent_low
     
     levels = {
@@ -329,195 +442,13 @@ def get_support_resistance_levels(data, window=20):
     return levels
 
 def calculate_volatility_metrics(data):
-    """
-    Calculate various volatility metrics
-    
-    Args:
-        data (pd.DataFrame): Stock price data
-        
-    Returns:
-        dict: Volatility metrics
-    """
+    """Calculate various volatility metrics"""
     returns = data['Close'].pct_change().dropna()
     
     metrics = {
         'daily_volatility': returns.std(),
         'annualized_volatility': returns.std() * np.sqrt(252),
-        'average_true_range': calculate_atr(data),
-        'volatility_percentile': None  # Would need longer history
+        'average_true_range': data['ATR'].iloc[-1] if 'ATR' in data.columns else None
     }
     
     return metrics
-
-def calculate_atr(data, window=14):
-    """
-    Calculate Average True Range
-    
-    Args:
-        data (pd.DataFrame): Stock OHLC data
-        window (int): ATR calculation window
-        
-    Returns:
-        pd.Series: ATR values
-    """
-    high_low = data['High'] - data['Low']
-    high_close = abs(data['High'] - data['Close'].shift())
-    low_close = abs(data['Low'] - data['Close'].shift())
-    
-    true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-    atr = true_range.rolling(window=window).mean()
-    
-    return atr
-
-def calculate_stochastic(data, k_window=14, d_window=3):
-    """
-    Calculate Stochastic Oscillator
-    
-    Args:
-        data (pd.DataFrame): Stock OHLC data
-        k_window (int): %K calculation window
-        d_window (int): %D smoothing window
-        
-    Returns:
-        tuple: (%K, %D)
-    """
-    lowest_low = data['Low'].rolling(window=k_window).min()
-    highest_high = data['High'].rolling(window=k_window).max()
-    
-    k_percent = 100 * ((data['Close'] - lowest_low) / (highest_high - lowest_low))
-    d_percent = k_percent.rolling(window=d_window).mean()
-    
-    return k_percent, d_percent
-
-def create_volume_profile_chart(data, ticker):
-    """
-    Create volume profile chart
-    
-    Args:
-        data (pd.DataFrame): Stock OHLCV data
-        ticker (str): Stock ticker symbol
-        
-    Returns:
-        plotly.graph_objects.Figure: Volume profile chart
-    """
-    # Simple volume profile approximation
-    price_bins = 50
-    price_min = data['Low'].min()
-    price_max = data['High'].max()
-    
-    bins = np.linspace(price_min, price_max, price_bins)
-    volume_profile = np.zeros(len(bins) - 1)
-    
-    for i, (idx, row) in enumerate(data.iterrows()):
-        # Find which bin this price falls into
-        bin_idx = np.digitize(row['Close'], bins) - 1
-        if 0 <= bin_idx < len(volume_profile):
-            volume_profile[bin_idx] += row['Volume']
-    
-    bin_centers = (bins[:-1] + bins[1:]) / 2
-    
-    fig = go.Figure()
-    
-    fig.add_trace(go.Bar(
-        y=bin_centers,
-        x=volume_profile,
-        orientation='h',
-        name='Volume Profile',
-        marker_color='lightblue',
-        opacity=0.7
-    ))
-    
-    fig.update_layout(
-        title=f'{ticker} Volume Profile',
-        xaxis_title='Volume',
-        yaxis_title='Price',
-        height=500,
-        template='plotly_white'
-    )
-    
-    return fig
-
-def calculate_momentum_indicators(data):
-    """
-    Calculate momentum indicators
-    
-    Args:
-        data (pd.DataFrame): Stock OHLC data
-        
-    Returns:
-        pd.DataFrame: Data with momentum indicators
-    """
-    # Rate of Change (ROC)
-    data['ROC'] = ((data['Close'] - data['Close'].shift(12)) / data['Close'].shift(12)) * 100
-    
-    # Williams %R
-    high_14 = data['High'].rolling(window=14).max()
-    low_14 = data['Low'].rolling(window=14).min()
-    data['Williams_R'] = -100 * ((high_14 - data['Close']) / (high_14 - low_14))
-    
-    # Commodity Channel Index (CCI)
-    typical_price = (data['High'] + data['Low'] + data['Close']) / 3
-    sma_tp = typical_price.rolling(window=20).mean()
-    mad = typical_price.rolling(window=20).apply(lambda x: np.abs(x - x.mean()).mean())
-    data['CCI'] = (typical_price - sma_tp) / (0.015 * mad)
-    
-    return data
-
-def get_technical_signals(data):
-    """
-    Generate technical trading signals
-    
-    Args:
-        data (pd.DataFrame): Stock data with indicators
-        
-    Returns:
-        dict: Trading signals
-    """
-    signals = {}
-    
-    # RSI signals
-    latest_rsi = data['RSI'].iloc[-1]
-    if latest_rsi > 70:
-        signals['RSI'] = 'Overbought - Consider Sell'
-    elif latest_rsi < 30:
-        signals['RSI'] = 'Oversold - Consider Buy'
-    else:
-        signals['RSI'] = 'Neutral'
-    
-    # Moving Average signals
-    if 'SMA_20' in data.columns and 'SMA_50' in data.columns:
-        sma_20 = data['SMA_20'].iloc[-1]
-        sma_50 = data['SMA_50'].iloc[-1]
-        current_price = data['Close'].iloc[-1]
-        
-        if current_price > sma_20 > sma_50:
-            signals['Moving_Average'] = 'Bullish - Price above both MAs'
-        elif current_price < sma_20 < sma_50:
-            signals['Moving_Average'] = 'Bearish - Price below both MAs'
-        else:
-            signals['Moving_Average'] = 'Mixed signals'
-    
-    # Bollinger Bands signals
-    if 'BB_Upper' in data.columns and 'BB_Lower' in data.columns:
-        current_price = data['Close'].iloc[-1]
-        bb_upper = data['BB_Upper'].iloc[-1]
-        bb_lower = data['BB_Lower'].iloc[-1]
-        
-        if current_price > bb_upper:
-            signals['Bollinger_Bands'] = 'Overbought - Price above upper band'
-        elif current_price < bb_lower:
-            signals['Bollinger_Bands'] = 'Oversold - Price below lower band'
-        else:
-            signals['Bollinger_Bands'] = 'Normal range'
-    
-    # MACD signals
-    if 'MACD' in data.columns and 'MACD_Signal' in data.columns:
-        macd = data['MACD'].iloc[-1]
-        macd_signal = data['MACD_Signal'].iloc[-1]
-        
-        if macd > macd_signal:
-            signals['MACD'] = 'Bullish - MACD above signal'
-        else:
-            signals['MACD'] = 'Bearish - MACD below signal'
-    
-    return signal
