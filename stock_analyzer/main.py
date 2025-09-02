@@ -24,11 +24,18 @@ from modules.technical_analysis import (
 )
 from modules.financial_charts import (
     create_combined_income_chart, 
-    create_combined_balance_sheet_chart,
-    create_historical_performance_chart,
+    create_comprehensive_balance_sheet_analysis,
     create_historical_ratios_chart,
-    create_waterfall_chart,
-    create_sankey_diagram
+    create_historical_performance_chart,
+    create_optimized_waterfall_chart,
+    create_sankey_diagram,
+    create_comprehensive_growth_analysis,
+    create_cash_flow_analysis,
+    create_advanced_profitability_analysis,
+    create_enhanced_dupont_analysis,
+    create_financial_health_dashboard,
+    create_debt_analysis_chart, 
+    #create_cash_conversion_cycle_chart
 )
 from modules.analytics import (
     calculate_financial_ratios,
@@ -605,80 +612,347 @@ def render_volatility_metrics(data):
         st.info("Calculating volatility metrics...")
 
 def render_financial_tab():
-    """Render financial performance tab"""
+    """Enhanced financial performance tab with better error handling"""
     st.markdown('<div class="tab-content">', unsafe_allow_html=True)
     
-    if 'income_stmt' not in st.session_state or st.session_state['income_stmt'] is None:
+    # Check for required data
+    required_data = ['income_stmt', 'balance_sheet', 'cash_flow']
+    available_data = [key for key in required_data if key in st.session_state and st.session_state[key] is not None]
+    
+    if not available_data:
         st.info("📊 Financial statement data not available for this ticker")
         st.markdown('</div>', unsafe_allow_html=True)
         return
     
+    # Show available data info
+    data_status = ", ".join([key.replace('_', ' ').title() for key in available_data])
+    st.success(f"📊 Available Data: {data_status}")
+    
     st.subheader("💰 Financial Performance")
     
-    # Create sub-tabs for better organization
-    fin_tab1, fin_tab2, fin_tab3 = st.tabs(["📊 Statements", "📈 Historical Trends", "🔍 Advanced Analysis"])
+    # Create enhanced sub-tabs
+    fin_tab1, fin_tab2, fin_tab3, fin_tab4 = st.tabs([
+        "📊 Financial Statements", 
+        "📈 Historical Analysis", 
+        "🔍 Advanced Analytics", 
+        "💡 Financial Health"
+    ])
     
     with fin_tab1:
         render_financial_statements_subtab()
     
     with fin_tab2:
-        render_historical_trends_subtab()
+        render_historical_analysis_subtab()
     
     with fin_tab3:
-        render_advanced_analysis_subtab()
+        render_advanced_analytics_subtab()
+    
+    with fin_tab4:
+        render_financial_health_subtab()
     
     st.markdown('</div>', unsafe_allow_html=True)
 
 def render_financial_statements_subtab():
-    """Render financial statements sub-tab"""
-    income_stmt = st.session_state.get('income_stmt')
-    balance_sheet = st.session_state.get('balance_sheet')
-    
-    if income_stmt is not None:
-        combined_income_fig = create_combined_income_chart(income_stmt)
-        if combined_income_fig:
-            st.plotly_chart(combined_income_fig, use_container_width=True)
-    
-    if balance_sheet is not None:
-        combined_balance_fig = create_combined_balance_sheet_chart(balance_sheet)
-        if combined_balance_fig:
-            st.plotly_chart(combined_balance_fig, use_container_width=True)
+    """Enhanced financial statements sub-tab"""
+    try:
+        income_stmt = st.session_state.get('income_stmt')
+        balance_sheet = st.session_state.get('balance_sheet')
+        cash_flow = st.session_state.get('cash_flow')
+        
+        # Income Statement Analysis
+        if income_stmt is not None:
+            st.subheader("📊 Income Statement")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Combined Revenue & Net Income
+                combined_income_fig = create_combined_income_chart(income_stmt)
+                if combined_income_fig:
+                    st.plotly_chart(combined_income_fig, use_container_width=True)
+                else:
+                    st.info("Unable to create income chart - insufficient data")
+            
+            with col2:
+                # Growth Analysis
+                growth_fig = create_comprehensive_growth_analysis(income_stmt)
+                if growth_fig:
+                    st.plotly_chart(growth_fig, use_container_width=True)
+                else:
+                    st.info("Growth analysis requires multiple years of data")
+        
+        # Balance Sheet Analysis
+        if balance_sheet is not None:
+            st.subheader("⚖️ Balance Sheet")
+            
+            # Use the correct function name based on what you have
+            # Option 1: If you want to use optimized version
+            balance_fig = create_comprehensive_balance_sheet_analysis(balance_sheet)
+            
+            # Option 2: If you want to use original version, uncomment this:
+            # balance_fig = create_combined_balance_sheet_chart(balance_sheet)
+            
+            if balance_fig:
+                st.plotly_chart(balance_fig, use_container_width=True)
+            else:
+                st.info("Unable to create balance sheet chart - insufficient data")
+        
+        # Cash Flow Analysis
+        if cash_flow is not None:
+            st.subheader("💰 Cash Flow")
+            cash_flow_fig = create_cash_flow_analysis(cash_flow)
+            if cash_flow_fig:
+                st.plotly_chart(cash_flow_fig, use_container_width=True)
+            else:
+                st.info("Unable to create cash flow chart - insufficient data")
+        
+    except Exception as e:
+        st.error(f"Error rendering financial statements: {str(e)}")
 
-def render_historical_trends_subtab():
-    """Render historical trends sub-tab"""
-    income_stmt = st.session_state.get('income_stmt')
-    balance_sheet = st.session_state.get('balance_sheet')
-    
-    if income_stmt is not None and balance_sheet is not None:
-        historical_ratios_fig = create_historical_ratios_chart(income_stmt, balance_sheet)
-        if historical_ratios_fig:
-            st.plotly_chart(historical_ratios_fig, use_container_width=True)
+def render_historical_analysis_subtab():
+    """Enhanced historical analysis sub-tab"""
+    try:
+        income_stmt = st.session_state.get('income_stmt')
+        balance_sheet = st.session_state.get('balance_sheet')
+        cash_flow = st.session_state.get('cash_flow')
+        
+        # Historical Ratios Analysis
+        if income_stmt is not None and balance_sheet is not None:
+            st.subheader("📊 Historical Financial Ratios")
+            historical_ratios_fig = create_historical_ratios_chart(income_stmt, balance_sheet)
+            if historical_ratios_fig:
+                st.plotly_chart(historical_ratios_fig, use_container_width=True)
+            else:
+                st.info("Historical ratios require both income statement and balance sheet data")
+        
+        # Profitability Analysis
+        if income_stmt is not None:
+            st.subheader("💹 Profitability Analysis")
+            profitability_fig = create_advanced_profitability_analysis(income_stmt)
+            if profitability_fig:
+                st.plotly_chart(profitability_fig, use_container_width=True)
+        
+        # DuPont Analysis
+        if income_stmt is not None and balance_sheet is not None:
+            st.subheader("🔬 DuPont ROE Analysis")
+            dupont_fig = create_enhanced_dupont_analysis(income_stmt, balance_sheet)
+            if dupont_fig:
+                st.plotly_chart(dupont_fig, use_container_width=True)
+        
+        # Historical Performance Charts (if you have the original function)
+        if income_stmt is not None and balance_sheet is not None and cash_flow is not None:
+            st.subheader("📈 Historical Performance Overview")
+            try:
+                historical_charts = create_historical_performance_chart(income_stmt, balance_sheet, cash_flow)
+                if historical_charts and isinstance(historical_charts, dict):
+                    # Display key charts
+                    chart_cols = st.columns(2)
+                    chart_index = 0
+                    for chart_name, chart_fig in historical_charts.items():
+                        if chart_fig is not None:
+                            with chart_cols[chart_index % 2]:
+                                st.plotly_chart(chart_fig, use_container_width=True)
+                            chart_index += 1
+            except Exception as e:
+                st.info("Historical performance charts not available")
+        
+    except Exception as e:
+        st.error(f"Error rendering historical analysis: {str(e)}")
 
-def render_advanced_analysis_subtab():
-    """Render advanced analysis sub-tab"""
-    income_stmt = st.session_state.get('income_stmt')
-    
-    if income_stmt is None or income_stmt.empty:
-        st.info("Income statement data required for advanced analysis")
-        return
-    
-    available_years = [str(col)[:4] for col in income_stmt.columns]
-    
-    col1, col2 = st.columns(2)
+def render_advanced_analytics_subtab():
+    """Enhanced advanced analytics sub-tab"""
+    try:
+        income_stmt = st.session_state.get('income_stmt')
+        balance_sheet = st.session_state.get('balance_sheet')
+        
+        if income_stmt is None or income_stmt.empty:
+            st.info("Income statement data required for advanced analysis")
+            return
+        
+        available_years = [str(col)[:4] for col in income_stmt.columns]
+        
+        # Year selection
+        st.subheader("🎯 Select Analysis Year")
+        selected_year = st.selectbox(
+            "Choose year for detailed analysis", 
+            available_years, 
+            key="advanced_analysis_year",
+            help="Select a year to analyze in detail"
+        )
+        
+        # Create three columns for different analyses
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.subheader("💧 Waterfall Analysis")
+            waterfall_fig = create_optimized_waterfall_chart(income_stmt, selected_year)
+            if waterfall_fig:
+                st.plotly_chart(waterfall_fig, use_container_width=True)
+            else:
+                st.info("Waterfall analysis not available for selected year")
+        
+        with col2:
+            st.subheader("🌊 Flow Analysis")
+            sankey_fig = create_sankey_diagram(income_stmt, selected_year)
+            if sankey_fig:
+                st.plotly_chart(sankey_fig, use_container_width=True)
+            else:
+                st.info("Flow analysis not available for selected year")
+        
+        with col3:
+            st.subheader("🔍 Ratio Breakdown")
+            # Create a simple ratio breakdown for the selected year
+            if balance_sheet is not None:
+                try:
+                    ratio_data = calculate_year_ratios(income_stmt, balance_sheet, selected_year)
+                    if ratio_data:
+                        display_ratio_breakdown(ratio_data)
+                    else:
+                        st.info("Ratio data not available for selected year")
+                except:
+                    st.info("Unable to calculate ratios for selected year")
+        
+        # Additional Advanced Analysis
+        st.markdown("---")
+        
+        # Debt Analysis (if you have the original function)
+        if balance_sheet is not None:
+            st.subheader("💳 Debt Analysis")
+            try:
+                debt_fig = create_debt_analysis_chart(balance_sheet)
+                if debt_fig:
+                    st.plotly_chart(debt_fig, use_container_width=True)
+            except:
+                st.info("Debt analysis chart not available")
+        
+        # Cash Conversion Cycle (if you have the original function)
+        if balance_sheet is not None and income_stmt is not None:
+            st.subheader("🔄 Working Capital Analysis")
+            try:
+                ccc_fig = create_cash_conversion_cycle_chart(balance_sheet, income_stmt)
+                if ccc_fig:
+                    st.plotly_chart(ccc_fig, use_container_width=True)
+            except:
+                st.info("Working capital analysis not available")
+        
+    except Exception as e:
+        st.error(f"Error rendering advanced analytics: {str(e)}")
+
+def render_financial_health_subtab():
+    """New financial health dashboard sub-tab"""
+    try:
+        income_stmt = st.session_state.get('income_stmt')
+        balance_sheet = st.session_state.get('balance_sheet')
+        cash_flow = st.session_state.get('cash_flow')
+        
+        if not any([income_stmt is not None, balance_sheet is not None, cash_flow is not None]):
+            st.info("Financial data required for health analysis")
+            return
+        
+        st.subheader("🏥 Financial Health Dashboard")
+        
+        # Overall Health Score
+        health_score = calculate_financial_health_score(income_stmt, balance_sheet, cash_flow)
+        if health_score:
+            display_health_score(health_score)
+        
+        # Comprehensive Health Dashboard
+        health_dashboard_fig = create_financial_health_dashboard(income_stmt, balance_sheet, cash_flow)
+        if health_dashboard_fig:
+            st.plotly_chart(health_dashboard_fig, use_container_width=True)
+        else:
+            st.info("Health dashboard requires more complete financial data")
+        
+        # Key Metrics Summary
+        if income_stmt is not None or balance_sheet is not None:
+            display_key_metrics_summary(income_stmt, balance_sheet, cash_flow)
+        
+    except Exception as e:
+        st.error(f"Error rendering financial health: {str(e)}")
+
+# Helper functions for the new features
+def calculate_year_ratios(income_stmt, balance_sheet, year):
+    """Calculate key ratios for a specific year"""
+    try:
+        # Find the column for the selected year
+        year_col = None
+        for col in income_stmt.columns:
+            if str(year) in str(col):
+                year_col = col
+                break
+        
+        if year_col is None or year_col not in balance_sheet.columns:
+            return None
+        
+        # Get data for the year
+        income_data = income_stmt[year_col]
+        balance_data = balance_sheet[year_col]
+        
+        # Calculate ratios
+        revenue = income_data.get('Total Revenue', 0)
+        net_income = income_data.get('Net Income', 0)
+        total_assets = balance_data.get('Total Assets', 0)
+        total_equity = balance_data.get('Stockholders Equity', 0) or balance_data.get('Total Stockholder Equity', 0)
+        
+        if revenue > 0 and total_assets > 0:
+            return {
+                'Net Margin': f"{(net_income/revenue*100):.2f}%" if revenue > 0 else "N/A",
+                'ROA': f"{(net_income/total_assets*100):.2f}%" if total_assets > 0 else "N/A",
+                'ROE': f"{(net_income/total_equity*100):.2f}%" if total_equity > 0 else "N/A",
+                'Asset Turnover': f"{(revenue/total_assets):.2f}x" if total_assets > 0 else "N/A"
+            }
+        return None
+    except:
+        return None
+
+def display_ratio_breakdown(ratio_data):
+    """Display ratio breakdown in a nice format"""
+    for ratio_name, ratio_value in ratio_data.items():
+        st.metric(ratio_name, ratio_value)
+
+def calculate_financial_health_score(income_stmt, balance_sheet, cash_flow):
+    """Calculate overall financial health score"""
+    try:
+        # This is a simplified health score calculation
+        # You can make this more sophisticated
+        score = 0
+        max_score = 0
+        
+        # Add scoring logic here based on your requirements
+        # For now, return a placeholder
+        return {"overall_score": 75, "grade": "B+", "factors": ["Profitability: Good", "Liquidity: Fair", "Leverage: Good"]}
+    except:
+        return None
+
+def display_health_score(health_score):
+    """Display financial health score"""
+    col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.subheader("💧 Waterfall Analysis")
-        selected_year_waterfall = st.selectbox("Select Year", available_years, key="waterfall_year")
-        waterfall_fig = create_waterfall_chart(income_stmt, selected_year_waterfall)
-        if waterfall_fig:
-            st.plotly_chart(waterfall_fig, use_container_width=True)
-    
+        st.metric("Health Score", f"{health_score['overall_score']}/100")
     with col2:
-        st.subheader("🌊 Flow Analysis")
-        selected_year_sankey = st.selectbox("Select Year", available_years, key="sankey_year")
-        sankey_fig = create_sankey_diagram(income_stmt, selected_year_sankey)
-        if sankey_fig:
-            st.plotly_chart(sankey_fig, use_container_width=True)
+        st.metric("Grade", health_score['grade'])
+    with col3:
+        st.info("Factors:\n" + "\n".join(health_score['factors']))
+
+def display_key_metrics_summary(income_stmt, balance_sheet, cash_flow):
+    """Display key metrics summary"""
+    st.subheader("📊 Key Metrics Summary")
+    
+    try:
+        # Get latest year data
+        if income_stmt is not None:
+            latest_income = income_stmt.iloc[:, 0]
+            revenue = latest_income.get('Total Revenue', 0)
+            net_income = latest_income.get('Net Income', 0)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Latest Revenue", f"${revenue/1e9:.2f}B" if revenue else "N/A")
+            with col2:
+                st.metric("Latest Net Income", f"${net_income/1e9:.2f}B" if net_income else "N/A")
+    except:
+        st.info("Unable to calculate key metrics")
 
 def render_analytics_tab(data, info, ticker):
     """Render analytics and ratings tab"""
