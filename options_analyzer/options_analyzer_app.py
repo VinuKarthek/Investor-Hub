@@ -50,7 +50,7 @@ class OptionsDataFetcher:
             progress_bar = st.progress(0)
             status_text = st.empty()
             
-            max_expirations = min(len(expirations), 15)
+            max_expirations = len(expirations)
             
             for i, exp_date in enumerate(expirations[:max_expirations]):
                 try:
